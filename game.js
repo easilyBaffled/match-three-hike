@@ -1,0 +1,617 @@
+'use strict';
+
+// ---------- data ----------
+const POS = {
+  QB: { name: 'QB', full: 'Quarterback', color: '#7b5cff', skill: 4 },
+  RB: { name: 'RB', full: 'Running Back', color: '#2fd45e', skill: 5 },
+  WR: { name: 'WR', full: 'Wide Receiver', color: '#21c7ff', skill: 5 },
+  SL: { name: 'SL', full: 'Slot Back', color: '#ff5db1', skill: 3 },
+  TE: { name: 'TE', full: 'Tight End', color: '#ff8a2b', skill: 3 },
+  OL: { name: 'OL', full: 'O-Line', color: '#ffd23f', skill: 4 },
+  FB: { name: 'FB', full: 'Fullback', color: '#ff4d4d', skill: 2 },
+};
+
+const PLAYS = [
+  { id: 'iso', name: 'POWER ISO', type: 'RUN', desc: 'Pound it up the gut behind the fullback.', personnel: ['OL', 'RB', 'FB', 'TE', 'QB'], prom: { RB: 3, OL: 2.4, FB: 1.6, TE: 1.2, QB: .7 }, base: [2, 7], big: [12, 22], explosive: .18, pass: false },
+  { id: 'slant', name: 'QUICK SLANT', type: 'PASS', desc: 'Rhythm throw to the receiver crossing the middle.', personnel: ['QB', 'WR', 'SL', 'TE', 'OL'], prom: { WR: 3, QB: 2, SL: 1.6, TE: 1, OL: 1.2 }, base: [4, 9], big: [14, 30], explosive: .28, pass: true },
+  { id: 'bomb', name: 'DEEP BOMB', type: 'PASS', desc: 'Heave it deep — boom or bust.', personnel: ['QB', 'WR', 'SL', 'OL', 'TE'], prom: { WR: 3.2, QB: 2.2, OL: 1.4, SL: 1.4, TE: .7 }, base: [0, 11], big: [26, 55], explosive: .44, pass: true },
+  { id: 'screen', name: 'RB SCREEN', type: 'PASS', desc: 'Dump to the back, let the line lead.', personnel: ['QB', 'RB', 'OL', 'WR', 'TE'], prom: { RB: 3, OL: 2.2, QB: 1.4, WR: 1, TE: 1 }, base: [3, 10], big: [16, 34], explosive: .3, pass: true },
+  { id: 'sweep', name: 'OUTSIDE SWEEP', type: 'RUN', desc: 'Bounce it outside and turn upfield.', personnel: ['RB', 'OL', 'WR', 'TE', 'QB'], prom: { RB: 3, OL: 2, WR: 1.4, TE: 1.2, QB: .7 }, base: [1, 9], big: [14, 28], explosive: .24, pass: false },
+  { id: 'pa', name: 'PLAY ACTION', type: 'PASS', desc: 'Fake the run, hit the tight end downfield.', personnel: ['QB', 'TE', 'WR', 'RB', 'OL'], prom: { QB: 2.6, TE: 2.4, WR: 1.8, RB: 1, OL: 1.2 }, base: [3, 11], big: [18, 40], explosive: .34, pass: true },
+];
+
+const ROWS = 7, COLS = 7, CELL = 50, FILL = 5, MOVES = 6;
+const SAVE_KEY = 'gridironGems:save';
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const clamp = (lo, hi, v) => Math.max(lo, Math.min(hi, v));
+const ordinal = (n) => ['', '1ST', '2ND', '3RD', '4TH'][n] || (n + 'TH');
+
+let _id = 1;
+const nid = () => 'g' + (_id++);
+
+function playById(id) { return PLAYS.find((p) => p.id === id); }
+
+// ---------- state ----------
+function freshState() {
+  return {
+    phase: 'title', score: 0, oppScore: 0, drive: 1,
+    ballOn: 25, down: 1, toGo: 10, playId: null, featured: null,
+    grid: [], meters: {}, movesLeft: MOVES, selected: null, busy: false,
+    result: null, shownYards: 0,
+    possession: 'you',
+    oppBallOn: 0, oppDown: 1, oppToGo: 10, oppLog: [],
+  };
+}
+
+let state = freshState();
+let hasSave = false;
+
+function loadSave() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+
+function saveGame() {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) { /* storage unavailable */ }
+}
+
+function clearSave() {
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* noop */ }
+}
+
+function setState(patch) {
+  Object.assign(state, patch);
+  if (state.phase !== 'title') saveGame();
+  render();
+}
+
+function currentPlay() { return playById(state.playId); }
+
+// ---------- match-three engine ----------
+function weights() {
+  const pl = currentPlay(), f = state.featured, w = {};
+  pl.personnel.forEach((k) => {
+    const b = pl.prom[k] || 1, s = POS[k].skill;
+    w[k] = b * (0.7 + s / 10) * (k === f ? 1.7 : 1);
+  });
+  return w;
+}
+
+function pick(w, keys) {
+  let t = 0; for (const k of keys) t += w[k];
+  let x = Math.random() * t;
+  for (const k of keys) { x -= w[k]; if (x <= 0) return k; }
+  return keys[keys.length - 1];
+}
+
+function buildGrid() {
+  const keys = currentPlay().personnel, w = weights(), g = [];
+  for (let r = 0; r < ROWS; r++) {
+    g.push([]);
+    for (let c = 0; c < COLS; c++) {
+      let col, t = 0;
+      do {
+        col = pick(w, keys); t++;
+      } while (t < 25 && (
+        (c >= 2 && g[r][c - 1].color === col && g[r][c - 2].color === col) ||
+        (r >= 2 && g[r - 1][c].color === col && g[r - 2][c].color === col)
+      ));
+      g[r].push({ id: nid(), color: col, spawn: false });
+    }
+  }
+  return g;
+}
+
+function findMatches(grid) {
+  const R = grid.length, C = grid[0].length, hit = {};
+  for (let r = 0; r < R; r++) {
+    let run = 1;
+    for (let c = 1; c <= C; c++) {
+      const a = c < C ? grid[r][c] : null, b = grid[r][c - 1];
+      if (a && b && a.color === b.color) run++;
+      else { if (run >= 3) for (let k = 1; k <= run; k++) hit[r + ',' + (c - k)] = 1; run = 1; }
+    }
+  }
+  for (let c = 0; c < C; c++) {
+    let run = 1;
+    for (let r = 1; r <= R; r++) {
+      const a = r < R ? grid[r][c] : null, b = grid[r - 1][c];
+      if (a && b && a.color === b.color) run++;
+      else { if (run >= 3) for (let k = 1; k <= run; k++) hit[(r - k) + ',' + c] = 1; run = 1; }
+    }
+  }
+  return Object.keys(hit).map((s) => s.split(',').map(Number));
+}
+
+function gravity(grid) {
+  const w = weights(), keys = currentPlay().personnel, R = grid.length, C = grid[0].length;
+  const g = grid.map((r) => r.slice());
+  for (let c = 0; c < C; c++) {
+    const st = [];
+    for (let r = R - 1; r >= 0; r--) if (g[r][c]) st.push(g[r][c]);
+    let i = 0;
+    for (let r = R - 1; r >= 0; r--) {
+      if (i < st.length) { const gem = st[i++]; gem.spawn = false; g[r][c] = gem; }
+      else g[r][c] = { id: nid(), color: pick(w, keys), spawn: true };
+    }
+  }
+  return g;
+}
+
+// ---------- outcome / drive model (shared by you & the defense) ----------
+function computeResult(play, F, olMeter) {
+  const stuffP = clamp(0.04, 0.32, 0.30 - F / 360 - (olMeter || 0) / 100 * 0.12);
+  if (Math.random() < stuffP) {
+    if (play.pass) {
+      if (Math.random() < 0.3) return { yards: -(3 + Math.floor(Math.random() * 6)), label: 'Sack in the backfield', type: 'SACK' };
+      return { yards: 0, label: 'Pass falls incomplete', type: 'INC' };
+    }
+    const y = -(Math.floor(Math.random() * 3));
+    return { yards: y, label: y < 0 ? 'Tackled for a loss' : 'Stuffed at the line', type: 'STUFF' };
+  }
+  const bigP = (F / 100) * play.explosive + 0.02;
+  if (Math.random() < bigP) {
+    const y = play.big[0] + Math.floor(Math.random() * (play.big[1] - play.big[0] + 1));
+    return { yards: y, label: play.pass ? 'Caught in stride — gone!' : 'Breaks free downfield!', type: 'BIG' };
+  }
+  const t = F / 100;
+  let y = Math.round(play.base[0] + (play.base[1] - play.base[0]) * t + (Math.random() * 4 - 2));
+  y = Math.max(play.pass ? 0 : -1, y);
+  return { yards: y, label: play.pass ? 'Completed for a pickup' : 'Picks up tough yards', type: 'GAIN' };
+}
+
+// side: 'you' drives toward ballOn=100, 'opp' drives toward ballOn=0
+function applyDrive(side, ballOn, down, toGo, yards) {
+  const dir = side === 'you' ? 1 : -1;
+  const nb = clamp(0, 100, ballOn + dir * yards);
+  const reachedGoal = side === 'you' ? nb >= 100 : nb <= 0;
+  if (reachedGoal) return { ballOn: side === 'you' ? 100 : 0, down: 1, toGo: 10, td: true, firstDown: false, turnover: false };
+  const distToGoal = side === 'you' ? 100 - nb : nb;
+  const tg = toGo - yards;
+  if (tg <= 0) return { ballOn: nb, down: 1, toGo: Math.min(10, distToGoal), td: false, firstDown: true, turnover: false };
+  const nd = down + 1;
+  if (nd > 4) return { ballOn: nb, down: nd, toGo: tg, td: false, firstDown: false, turnover: true };
+  return { ballOn: nb, down: nd, toGo: tg, td: false, firstDown: false, turnover: false };
+}
+
+// ---------- your turn ----------
+function start() { setState({ phase: 'playcall' }); }
+
+function pickPlay(id) { setState({ playId: id, featured: null }); }
+function feature(k) { setState({ featured: k }); }
+
+function hike() {
+  if (!state.playId || !state.featured) return;
+  _id = 1;
+  const grid = buildGrid(), meters = {};
+  currentPlay().personnel.forEach((k) => { meters[k] = 0; });
+  setState({ phase: 'board', grid, meters, movesLeft: MOVES, selected: null, busy: false, result: null });
+}
+
+function onCellTap(r, c) {
+  if (state.busy || state.phase !== 'board') return;
+  const s = state.selected;
+  if (!s) { setState({ selected: { r, c } }); return; }
+  if (s.r === r && s.c === c) { setState({ selected: null }); return; }
+  if (Math.abs(s.r - r) + Math.abs(s.c - c) === 1) trySwap(s, { r, c });
+  else setState({ selected: { r, c } });
+}
+
+async function trySwap(a, b) {
+  const grid = state.grid, g = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
+  const t = g[a.r][a.c]; g[a.r][a.c] = g[b.r][b.c]; g[b.r][b.c] = t;
+  setState({ grid: g, selected: null, busy: true });
+  await sleep(200);
+  if (!findMatches(g).length) {
+    const g2 = g.map((row) => row.map((x) => (x ? { ...x } : null)));
+    const t2 = g2[a.r][a.c]; g2[a.r][a.c] = g2[b.r][b.c]; g2[b.r][b.c] = t2;
+    setState({ grid: g2 });
+    await sleep(200);
+    setState({ busy: false });
+    return;
+  }
+  setState({ movesLeft: state.movesLeft - 1 });
+  await resolveCascade(g, state.meters, 1);
+}
+
+async function resolveCascade(grid, meters, combo) {
+  const m = findMatches(grid);
+  if (!m.length) { setState({ grid, meters, busy: false }); afterMove(); return; }
+  const g2 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
+  const nm = { ...meters };
+  m.forEach(([r, c]) => {
+    const x = g2[r][c];
+    if (x) { x.clearing = true; nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL * combo); }
+  });
+  setState({ grid: g2, meters: nm });
+  await sleep(190);
+  const g3 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
+  m.forEach(([r, c]) => { g3[r][c] = null; });
+  const g4 = gravity(g3);
+  setState({ grid: g4 });
+  await sleep(200);
+  await resolveCascade(g4, nm, Math.min(3, combo + 0.5));
+}
+
+function afterMove() {
+  if (state.movesLeft <= 0 && state.phase === 'board') setTimeout(() => snap(), 450);
+}
+
+function snap() {
+  if (state.phase !== 'board') return;
+  const play = currentPlay(), f = state.featured, F = state.meters[f] || 0;
+  const res = computeResult(play, F, state.meters.OL || 0);
+  const app = applyDrive('you', state.ballOn, state.down, state.toGo, res.yards);
+  const headline = app.td ? 'TOUCHDOWN!' : app.turnover ? 'TURNOVER ON DOWNS' : app.firstDown ? 'FIRST DOWN!' : ordinal(app.down) + ' & ' + (app.toGo <= 0 ? 'GOAL' : app.toGo);
+  const score = app.td ? state.score + 7 : state.score;
+  setState({
+    phase: 'result', ballOn: app.ballOn, down: app.down, toGo: app.toGo, score, shownYards: 0,
+    result: { label: res.label, type: res.type, headline, td: app.td, turnover: app.turnover, yards: res.yards, meterPct: Math.round(F), featured: f },
+  });
+  animateYards(res.yards);
+}
+
+let _yt = null;
+function animateYards(t) {
+  clearInterval(_yt);
+  if (t === 0) { setState({ shownYards: 0 }); return; }
+  let cur = 0; const step = t > 0 ? 1 : -1;
+  _yt = setInterval(() => {
+    cur += step; setState({ shownYards: cur });
+    if (cur === t) clearInterval(_yt);
+  }, 50);
+}
+
+function continueAfterResult() {
+  const r = state.result;
+  if (r.td) {
+    // kickoff to the defense, ball at their own 25 (absolute ballOn = 75)
+    startOppDrive(75);
+  } else if (r.turnover) {
+    startOppDrive(state.ballOn);
+  } else {
+    setState({ phase: 'playcall', playId: null, featured: null, result: null });
+  }
+}
+
+// ---------- defense / opponent drive ----------
+function startOppDrive(spotAbsolute) {
+  setState({
+    phase: 'oppdrive', possession: 'opp', result: null,
+    oppBallOn: spotAbsolute, oppDown: 1, oppToGo: Math.min(10, spotAbsolute), oppLog: [],
+  });
+  setTimeout(runOppPlay, 700);
+}
+
+async function runOppPlay() {
+  if (state.phase !== 'oppdrive') return;
+  const distToGoal = state.oppBallOn;
+  const goingForIt = !(state.oppDown === 4 && state.oppToGo > 2 && distToGoal > 50);
+
+  if (!goingForIt) {
+    const puntDistance = 35 + Math.floor(Math.random() * 11);
+    const newBallOn = clamp(10, 90, state.oppBallOn - puntDistance);
+    const log = [...state.oppLog, `4TH & ${state.oppToGo} — OPP PUNTS`];
+    setState({ oppLog: log });
+    await sleep(900);
+    setState({
+      phase: 'playcall', possession: 'you', playId: null, featured: null,
+      ballOn: newBallOn, down: 1, toGo: Math.min(10, 100 - newBallOn), drive: state.drive + 1,
+    });
+    return;
+  }
+
+  const play = PLAYS[Math.floor(Math.random() * PLAYS.length)];
+  const F = 30 + Math.random() * 60;
+  const olMeter = 20 + Math.random() * 60;
+  const res = computeResult(play, F, olMeter);
+  const app = applyDrive('opp', state.oppBallOn, state.oppDown, state.oppToGo, res.yards);
+
+  const signed = (res.yards > 0 ? '+' : '') + res.yards;
+  let logLine = `${play.name}: ${signed} yd — ${res.label}`;
+  const log = [...state.oppLog, logLine];
+  setState({ oppLog: log });
+  await sleep(850);
+
+  if (app.td) {
+    setState({ oppLog: [...log, 'OPPONENT TOUCHDOWN!'], oppScore: state.oppScore + 7 });
+    await sleep(1100);
+    setState({ phase: 'playcall', possession: 'you', playId: null, featured: null, ballOn: 25, down: 1, toGo: 10, drive: state.drive + 1 });
+    return;
+  }
+  if (app.turnover) {
+    setState({ oppLog: [...log, 'TURNOVER ON DOWNS'] });
+    await sleep(1000);
+    setState({ phase: 'playcall', possession: 'you', playId: null, featured: null, ballOn: app.ballOn, down: 1, toGo: Math.min(10, 100 - app.ballOn), drive: state.drive + 1 });
+    return;
+  }
+  setState({ oppBallOn: app.ballOn, oppDown: app.down, oppToGo: app.toGo });
+  setTimeout(runOppPlay, 600);
+}
+
+// ---------- save / resume ----------
+function newGame() {
+  clearSave();
+  _id = 1;
+  state = freshState();
+  setState({ phase: 'playcall' });
+}
+
+function resumeGame() {
+  const saved = loadSave();
+  if (!saved) { newGame(); return; }
+  state = saved;
+  // never resume mid-animation or mid-opponent-drive cleanly — drop back to a stable screen
+  if (state.busy) state.busy = false;
+  if (state.phase === 'oppdrive') {
+    state.phase = 'playcall'; state.possession = 'you'; state.playId = null; state.featured = null;
+  }
+  render();
+}
+
+// ---------- render helpers ----------
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+function styleStr(o) {
+  return Object.entries(o).map(([k, v]) => `${k.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())}:${v}`).join(';');
+}
+
+function renderTitle() {
+  const gemColors = ['#7b5cff', '#2fd45e', '#21c7ff', '#ffd23f'];
+  const gems = gemColors.map((c) => `<div style="width:38px;height:38px;background:${c};border:3px solid rgba(0,0,0,.5);border-radius:8px;box-shadow:inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.3);"></div>`).join('');
+  const continueBtn = hasSave
+    ? `<div data-action="resumeGame" style="margin-top:6px;font-family:'Press Start 2P',monospace;font-size:13px;color:#13210f;background:#ffd23f;border:3px solid #04060e;border-radius:8px;padding:13px 20px;box-shadow:0 5px 0 #b58a0c;cursor:pointer;letter-spacing:1px;">CONTINUE</div>
+       <div data-action="newGame" style="margin-top:10px;font-size:18px;color:#8fb4ff;cursor:pointer;text-decoration:underline;">Start a new game</div>`
+    : `<div data-action="newGame" style="margin-top:18px;font-family:'Press Start 2P',monospace;font-size:13px;color:#fff;animation:blink 1.1s steps(1) infinite;cursor:pointer;">PRESS START</div>`;
+  return `
+    <div data-screen-label="Title" data-action="${hasSave ? '' : 'newGame'}" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;cursor:pointer;background:radial-gradient(circle at 50% 32%,#16285a 0%,#0a1020 70%);padding:30px;">
+      <div style="display:flex;gap:9px;animation:floaty 3s ease-in-out infinite;">${gems}</div>
+      <div style="text-align:center;">
+        <div class="pixel" style="font-size:34px;line-height:1.18;color:#ffd23f;text-shadow:4px 4px 0 #b1471a,7px 7px 0 rgba(0,0,0,.45);letter-spacing:1px;">GRIDIRON<br>GEMS</div>
+      </div>
+      <div style="font-size:24px;color:#8fb4ff;letter-spacing:3px;text-transform:uppercase;">Match-3 Football RPG</div>
+      ${continueBtn}
+      <div style="position:absolute;bottom:24px;font-size:18px;color:#5870a8;letter-spacing:1px;">${hasSave ? 'SAVED GAME FOUND' : 'TAP ANYWHERE TO BEGIN'}</div>
+    </div>`;
+}
+
+function fieldBar(S) {
+  const fdPct = Math.min(100, S.ballOn + S.toGo);
+  const fdLine = styleStr({ position: 'absolute', top: '-2px', bottom: '-2px', left: fdPct + '%', width: '3px', background: '#ffd23f', boxShadow: '0 0 6px #ffd23f', transition: 'left .5s', zIndex: 3 });
+  const ballMark = styleStr({ position: 'absolute', top: '50%', left: S.ballOn + '%', transform: 'translate(-50%,-50%)', width: '15px', height: '10px', background: '#c47b40', border: '2px solid #f2ddc6', borderRadius: '50%', transition: 'left .6s cubic-bezier(.3,.7,.3,1)', zIndex: 4 });
+  return `<div style="position:relative;height:32px;border:3px solid #04060e;border-radius:6px;overflow:hidden;background:#16341f;box-shadow:inset 0 0 0 2px #1f4a2c;">
+    <div style="position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 9.9%,rgba(255,255,255,.13) 9.9% calc(9.9% + 2px));"></div>
+    <div style="position:absolute;top:0;right:0;bottom:0;width:8%;background:rgba(47,212,94,.32);border-left:2px solid #2fd45e;"></div>
+    <div style="${fdLine}"></div>
+    <div style="${ballMark}"></div>
+  </div>`;
+}
+
+function renderPlaycall() {
+  const S = state, cp = currentPlay();
+  const spot = S.ballOn > 50 ? ('OPP ' + (100 - S.ballOn)) : ('OWN ' + S.ballOn);
+  const downDist = ordinal(S.down) + ' & ' + (S.toGo <= 0 ? 'GOAL' : S.toGo);
+
+  const playCards = PLAYS.map((p) => {
+    const sel = S.playId === p.id, isRun = p.type === 'RUN';
+    const cardStyle = styleStr({ padding: '11px 12px', borderRadius: '9px', cursor: 'pointer', border: '3px solid ' + (sel ? '#ffd23f' : '#27365c'), background: sel ? '#1b2748' : '#121a32', boxShadow: sel ? '0 0 0 3px rgba(255,210,63,.25),4px 4px 0 rgba(0,0,0,.45)' : '3px 3px 0 rgba(0,0,0,.4)', transform: sel ? 'translateY(-2px)' : 'none', transition: 'all .12s' });
+    const badgeStyle = styleStr({ fontFamily: "'Press Start 2P',monospace", fontSize: '8px', padding: '4px 6px', borderRadius: '4px', color: '#0a0e1f', background: isRun ? '#2fd45e' : '#21c7ff' });
+    const chips = p.personnel.map((k) => `<div style="width:26px;height:22px;display:flex;align-items:center;justify-content:center;font-family:'Press Start 2P',monospace;font-size:8px;color:#fff;background:${POS[k].color};border:2px solid rgba(0,0,0,.4);border-radius:4px;text-shadow:1px 1px 0 rgba(0,0,0,.5);">${POS[k].name}</div>`).join('');
+    return `<div data-action="pickPlay" data-id="${p.id}" style="${cardStyle}">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <div class="pixel" style="font-size:11px;color:#fff;">${p.name}</div>
+        <div style="${badgeStyle}">${p.type}</div>
+      </div>
+      <div style="font-size:18px;color:#9fb3dd;line-height:1.15;margin-top:4px;">${p.desc}</div>
+      <div style="display:flex;gap:5px;margin-top:10px;">${chips}</div>
+    </div>`;
+  }).join('');
+
+  let featureSection = '';
+  if (cp) {
+    const rows = cp.personnel.map((k) => {
+      const sel = S.featured === k, prom = cp.prom[k] || 1;
+      const tag = prom >= 2.5 ? 'PRIMARY' : prom >= 1.4 ? 'SUPPORT' : 'DECOY';
+      const chipStyle = styleStr({ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 11px', borderRadius: '9px', cursor: 'pointer', border: '3px solid ' + (sel ? '#ffd23f' : '#27365c'), background: sel ? '#1d2748' : '#121a32', boxShadow: sel ? '0 0 0 3px rgba(255,210,63,.25)' : 'none', transition: 'all .12s' });
+      const swatchStyle = styleStr({ width: '40px', height: '40px', flex: '0 0 40px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Press Start 2P',monospace", fontSize: '11px', color: '#fff', background: POS[k].color, border: '3px solid rgba(0,0,0,.45)', borderRadius: '7px', textShadow: '1px 1px 0 rgba(0,0,0,.5)', boxShadow: 'inset 2px 2px 0 rgba(255,255,255,.4),inset -3px -3px 0 rgba(0,0,0,.3)' });
+      const tagStyle = styleStr({ fontFamily: "'Press Start 2P',monospace", fontSize: '7px', padding: '4px 6px', borderRadius: '4px', color: sel ? '#0a0e1f' : '#8fb4ff', background: sel ? '#ffd23f' : '#1c2848' });
+      const stars = '★'.repeat(POS[k].skill) + '☆'.repeat(5 - POS[k].skill);
+      return `<div data-action="feature" data-pos="${k}" style="${chipStyle}">
+        <div style="${swatchStyle}">${POS[k].name}</div>
+        <div style="flex:1;">
+          <div style="font-size:20px;color:#fff;line-height:1;">${POS[k].full}</div>
+          <div style="font-size:15px;color:#ffd23f;letter-spacing:1px;">${stars}</div>
+        </div>
+        <div style="${tagStyle}">${tag}</div>
+      </div>`;
+    }).join('');
+    featureSection = `
+      <div class="pixel" style="font-size:10px;color:#ffd23f;margin:18px 0 4px;">2 ▸ FEATURE A PLAYER</div>
+      <div style="font-size:17px;color:#7f97cf;margin-bottom:10px;">Your star gets more gems on the board — and decides the play.</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">${rows}</div>`;
+  }
+
+  const canHike = !!(cp && S.featured);
+  const hikeLabel = canHike ? '▸ HIKE THE BALL' : (cp ? 'PICK A PLAYER TO FEATURE' : 'PICK A PLAY');
+  const hikeBtnStyle = styleStr({ textAlign: 'center', fontFamily: "'Press Start 2P',monospace", fontSize: '13px', padding: '14px', borderRadius: '9px', border: '3px solid #04060e', letterSpacing: '1px', cursor: canHike ? 'pointer' : 'not-allowed', color: canHike ? '#13210f' : '#5870a8', background: canHike ? '#ffd23f' : '#141d36', boxShadow: canHike ? '0 5px 0 #b58a0c' : 'none' });
+
+  return `<div data-screen-label="Play Call" class="screen">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px 8px;border-bottom:3px solid #04060e;background:#0b1228;">
+      <div class="pixel" style="font-size:10px;color:#6f86c4;">DRIVE ${S.drive}</div>
+      <div class="pixel" style="font-size:10px;color:#ffd23f;">YOU ${S.score} &nbsp;·&nbsp; OPP ${S.oppScore}</div>
+    </div>
+    <div style="padding:12px 14px 10px;background:#0b1228;border-bottom:3px solid #04060e;">
+      ${fieldBar(S)}
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:8px;">
+        <div class="pixel" style="font-size:13px;color:#fff;">${downDist}</div>
+        <div style="font-size:19px;color:#7f97cf;letter-spacing:1px;">BALL ON ${spot}</div>
+      </div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:12px 14px 120px;">
+      <div class="pixel" style="font-size:10px;color:#ffd23f;margin:2px 0 10px;">1 ▸ CHOOSE YOUR PLAY</div>
+      <div style="display:flex;flex-direction:column;gap:9px;">${playCards}</div>
+      ${featureSection}
+    </div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:14px;background:linear-gradient(transparent,#0a0e1f 26%);">
+      <div data-action="${canHike ? 'hike' : ''}" style="${hikeBtnStyle}">${hikeLabel}</div>
+    </div>
+  </div>`;
+}
+
+function renderBoard() {
+  const S = state, cp = currentPlay();
+  const spot = S.ballOn > 50 ? ('OPP ' + (100 - S.ballOn)) : ('OWN ' + S.ballOn);
+  const downDist = ordinal(S.down) + ' & ' + (S.toGo <= 0 ? 'GOAL' : S.toGo);
+  const boardW = (CELL * COLS) + 'px';
+
+  const gems = [];
+  for (let r = 0; r < S.grid.length; r++) {
+    for (let c = 0; c < (S.grid[r] || []).length; c++) {
+      const g = S.grid[r][c];
+      if (!g) continue;
+      const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
+      const outerStyle = styleStr({ position: 'absolute', width: CELL + 'px', height: CELL + 'px', transform: `translate(${c * CELL}px,${r * CELL}px)`, transition: 'transform .19s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: 'pointer' });
+      const anim = g.clearing ? 'popOut .19s forwards' : (g.spawn ? 'gemDrop .28s ease-out' : 'none');
+      const innerStyle = styleStr({ width: '100%', height: '100%', background: p.color, border: '3px solid rgba(0,0,0,.5)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: '11px', textShadow: '1px 1px 0 rgba(0,0,0,.55)', boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: anim });
+      gems.push(`<div data-action="cellTap" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${p.name}</div></div>`);
+    }
+  }
+  const boardStyle = styleStr({ position: 'relative', width: (CELL * COLS) + 'px', height: (CELL * ROWS) + 'px' });
+
+  const fk = S.featured;
+  let fMeterHtml = '';
+  if (fk) {
+    const pct = Math.round(S.meters[fk] || 0);
+    fMeterHtml = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
+        <div style="display:flex;align-items:center;gap:7px;">
+          <div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-family:'Press Start 2P',monospace;font-size:9px;color:#fff;background:${POS[fk].color};border:2px solid rgba(0,0,0,.45);border-radius:5px;text-shadow:1px 1px 0 rgba(0,0,0,.5);">${POS[fk].name}</div>
+          <div style="font-size:20px;color:#fff;letter-spacing:1px;white-space:nowrap;">${POS[fk].full}</div>
+        </div>
+        <div class="pixel" style="font-size:12px;color:#ffd23f;">${pct}%</div>
+      </div>
+      <div style="position:relative;height:18px;border:3px solid #04060e;border-radius:5px;overflow:hidden;background:#10182f;">
+        <div style="height:100%;width:${pct}%;background:${POS[fk].color};transition:width .18s;box-shadow:0 0 8px ${POS[fk].color};"></div>
+        <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.25),transparent 50%);pointer-events:none;"></div>
+      </div>`;
+  }
+
+  const roster = (cp ? cp.personnel : []).map((k) => {
+    const sel = S.featured === k, h = Math.round(S.meters[k] || 0);
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
+      <div style="position:relative;width:100%;height:34px;border:2px solid #04060e;border-radius:4px;overflow:hidden;background:#10182f;display:flex;align-items:flex-end;">
+        <div style="width:100%;height:${h}%;background:${POS[k].color};transition:height .18s;"></div>
+      </div>
+      <div class="pixel" style="font-size:8px;color:${sel ? '#ffd23f' : '#6f86c4'};">${k}</div>
+    </div>`;
+  }).join('');
+
+  const movesColor = S.movesLeft <= 2 ? '#ff4d4d' : '#ffd23f';
+
+  return `<div data-screen-label="Board" class="screen">
+    <div style="padding:9px 14px 8px;background:#0b1228;border-bottom:3px solid #04060e;flex:0 0 auto;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div class="pixel" style="font-size:10px;color:#fff;">${downDist}</div>
+        <div class="pixel" style="font-size:10px;color:#ffd23f;">YOU ${S.score} · OPP ${S.oppScore}</div>
+      </div>
+      ${fieldBar(S)}
+      <div style="text-align:center;margin-top:5px;font-size:16px;color:#7f97cf;letter-spacing:1px;white-space:nowrap;">BALL ON ${spot}</div>
+    </div>
+    <div style="flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;justify-content:safe center;padding:10px 8px;background:radial-gradient(circle at 50% 40%,#0e1a14,#0a0e1f 75%);">
+      <div style="display:flex;align-items:center;justify-content:space-between;width:${boardW};margin-bottom:8px;flex:0 0 auto;">
+        <div style="font-size:17px;color:#7f97cf;letter-spacing:1px;white-space:nowrap;">PLAY: <span style="color:#fff;">${cp ? cp.name : ''}</span></div>
+        <div class="pixel" style="font-size:10px;color:${movesColor};">MOVES ${S.movesLeft}</div>
+      </div>
+      <div style="position:relative;border:4px solid #04060e;border-radius:10px;background:#16341f;box-shadow:inset 0 0 0 3px #1f4a2c,0 8px 0 rgba(0,0,0,.4);padding:5px;flex:0 0 auto;">
+        <div style="position:absolute;inset:5px;border-radius:6px;background:repeating-linear-gradient(0deg,transparent 0 13.9%,rgba(255,255,255,.07) 13.9% calc(13.9% + 2px)),repeating-linear-gradient(90deg,transparent 0 13.9%,rgba(255,255,255,.07) 13.9% calc(13.9% + 2px));pointer-events:none;"></div>
+        <div style="${boardStyle}">${gems.join('')}</div>
+      </div>
+    </div>
+    <div style="padding:10px 14px 14px;background:#0b1228;border-top:3px solid #04060e;flex:0 0 auto;">
+      ${fMeterHtml}
+      <div style="display:flex;gap:7px;margin-top:10px;align-items:flex-end;">${roster}</div>
+      <div data-action="snap" style="margin-top:12px;text-align:center;font-family:'Press Start 2P',monospace;font-size:15px;color:#13210f;background:#ffd23f;border:3px solid #04060e;border-radius:8px;padding:13px;box-shadow:0 5px 0 #b58a0c,0 8px 12px rgba(0,0,0,.4);cursor:pointer;letter-spacing:1px;">🏈 HIKE!</div>
+    </div>
+  </div>`;
+}
+
+function renderResult() {
+  const S = state, R = S.result, fp = POS[R.featured];
+  const acc = R.td ? '#2fd45e' : (R.turnover ? '#ff4d4d' : '#ffd23f');
+  const sign = S.shownYards < 0 ? '-' : '+';
+  const continueLabel = R.td ? 'KICKOFF ▸' : (R.turnover ? 'OPP BALL ▸' : 'NEXT PLAY ▸');
+  return `<div data-screen-label="Result" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,8,18,.82);padding:24px;">
+    <div style="width:100%;max-width:320px;text-align:center;padding:24px 22px;border-radius:14px;border:4px solid ${acc};background:#0b1228;box-shadow:0 0 0 4px #04060e,0 14px 40px rgba(0,0,0,.6);animation:popIn .3s ease-out;">
+      <div class="pixel" style="font-size:18px;color:${acc};text-shadow:3px 3px 0 rgba(0,0,0,.4);line-height:1.3;">${R.headline}</div>
+      <div style="font-size:23px;color:#cdddff;letter-spacing:1px;margin-top:2px;">${R.label}</div>
+      <div class="pixel" style="margin:18px 0 6px;font-size:46px;line-height:1;color:${acc};text-shadow:4px 4px 0 rgba(0,0,0,.4);">${sign}${Math.abs(S.shownYards)}</div>
+      <div class="pixel" style="font-size:13px;color:#7f97cf;">YARDS</div>
+      <div style="margin-top:20px;padding:12px;border:3px solid #1f2c4e;border-radius:8px;background:#0c1226;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;">
+          <div style="display:flex;align-items:center;gap:7px;">
+            <div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-family:'Press Start 2P',monospace;font-size:9px;color:#fff;background:${fp.color};border:2px solid rgba(0,0,0,.45);border-radius:5px;">${fp.name}</div>
+            <div style="font-size:19px;color:#fff;">${fp.full}</div>
+          </div>
+          <div class="pixel" style="font-size:11px;color:#ffd23f;">${R.meterPct}%</div>
+        </div>
+        <div style="position:relative;height:13px;border:2px solid #04060e;border-radius:4px;overflow:hidden;background:#10182f;">
+          <div style="height:100%;width:${R.meterPct}%;background:${fp.color};"></div>
+        </div>
+      </div>
+      <div data-action="continue" style="margin-top:20px;font-family:'Press Start 2P',monospace;font-size:13px;color:#13210f;background:#ffd23f;border:3px solid #04060e;border-radius:8px;padding:13px;box-shadow:0 5px 0 #b58a0c;cursor:pointer;letter-spacing:1px;">${continueLabel}</div>
+    </div>
+  </div>`;
+}
+
+function renderOppDrive() {
+  const S = state;
+  const spot = S.oppBallOn > 50 ? ('OPP ' + S.oppBallOn) : ('OWN ' + (100 - S.oppBallOn));
+  const lines = S.oppLog.map((l) => `<div style="font-size:18px;color:#cdddff;padding:6px 0;border-bottom:1px solid #1f2c4e;">${esc(l)}</div>`).join('');
+  return `<div data-screen-label="Defense" style="position:absolute;inset:0;display:flex;flex-direction:column;background:#0a0e1f;">
+    <div style="padding:12px 14px;background:#0b1228;border-bottom:3px solid #04060e;text-align:center;">
+      <div class="pixel" style="font-size:13px;color:#ff8a2b;">⛨ OPPONENT'S DRIVE</div>
+      <div style="font-size:17px;color:#7f97cf;margin-top:4px;">BALL ON ${spot} · ${ordinal(S.oppDown)} &amp; ${S.oppToGo <= 0 ? 'GOAL' : S.oppToGo}</div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:14px;">${lines}</div>
+  </div>`;
+}
+
+function render() {
+  const app = document.getElementById('app');
+  let html;
+  if (state.phase === 'title') html = renderTitle();
+  else if (state.phase === 'playcall') html = renderPlaycall();
+  else if (state.phase === 'board') html = renderBoard();
+  else if (state.phase === 'result') html = renderResult();
+  else if (state.phase === 'oppdrive') html = renderOppDrive();
+  else html = '';
+  app.innerHTML = html;
+}
+
+// ---------- input delegation ----------
+document.addEventListener('DOMContentLoaded', () => {
+  const saved = loadSave();
+  hasSave = !!(saved && saved.phase && saved.phase !== 'title');
+  render();
+
+  document.getElementById('app').addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const action = el.dataset.action;
+    if (!action) return;
+    switch (action) {
+      case 'newGame': newGame(); break;
+      case 'resumeGame': resumeGame(); break;
+      case 'start': start(); break;
+      case 'pickPlay': pickPlay(el.dataset.id); break;
+      case 'feature': feature(el.dataset.pos); break;
+      case 'hike': hike(); break;
+      case 'cellTap': onCellTap(Number(el.dataset.r), Number(el.dataset.c)); break;
+      case 'snap': snap(); break;
+      case 'continue': continueAfterResult(); break;
+      default: break;
+    }
+  });
+});
