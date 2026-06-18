@@ -11,6 +11,18 @@ const POS = {
   FB: { name: 'FB', full: 'Fullback', color: '#ff4d4d', skill: 2 },
 };
 
+// Each offensive position is covered by one defender. Blank-gem odds for
+// that position come from the skill gap between the two.
+const DEFENSE = {
+  QB: { name: 'DL', full: 'Pass Rush', skill: 4 },
+  RB: { name: 'LB', full: 'Linebacker', skill: 4 },
+  WR: { name: 'CB', full: 'Cornerback', skill: 5 },
+  SL: { name: 'NB', full: 'Nickel Back', skill: 3 },
+  TE: { name: 'S', full: 'Safety', skill: 3 },
+  OL: { name: 'DL', full: 'Defensive Line', skill: 4 },
+  FB: { name: 'LB', full: 'Linebacker', skill: 3 },
+};
+
 const PLAYS = [
   { id: 'iso', name: 'POWER ISO', type: 'RUN', desc: 'Pound it up the gut behind the fullback.', personnel: ['OL', 'RB', 'FB', 'TE', 'QB'], prom: { RB: 3, OL: 2.4, FB: 1.6, TE: 1.2, QB: .7 }, base: [2, 7], big: [12, 22], explosive: .18, pass: false },
   { id: 'slant', name: 'QUICK SLANT', type: 'PASS', desc: 'Rhythm throw to the receiver crossing the middle.', personnel: ['QB', 'WR', 'SL', 'TE', 'OL'], prom: { WR: 3, QB: 2, SL: 1.6, TE: 1, OL: 1.2 }, base: [4, 9], big: [14, 30], explosive: .28, pass: true },
@@ -41,6 +53,7 @@ function freshState() {
     result: null, shownYards: 0,
     possession: 'you',
     oppBallOn: 0, oppDown: 1, oppToGo: 10, oppLog: [],
+    showMatchup: false,
   };
 }
 
@@ -81,6 +94,33 @@ function weights() {
   return w;
 }
 
+// Odds that a gem of this offensive color spawns "blank" (uncatchable),
+// driven purely by the skill gap against the defender who covers it.
+function blankChanceFor(k) {
+  return clamp(0.04, 0.4, 0.06 + (DEFENSE[k].skill - POS[k].skill) * 0.07);
+}
+
+function blankChances() {
+  const out = {};
+  currentPlay().personnel.forEach((k) => { out[k] = blankChanceFor(k); });
+  return out;
+}
+
+// Static gem-contribution share for the matchup screen: skill plus the
+// current play's promotion multiplier (falls back to 1 with no play picked).
+function offenseShare() {
+  const cp = currentPlay(), keys = cp ? cp.personnel : Object.keys(POS), prom = cp ? cp.prom : {};
+  const w = {};
+  keys.forEach((k) => { w[k] = (prom[k] || 1) * (0.7 + POS[k].skill / 10); });
+  const total = keys.reduce((s, k) => s + w[k], 0);
+  return keys.map((k) => ({ key: k, pct: Math.round((w[k] / total) * 100) }));
+}
+
+function defenseImpact() {
+  const cp = currentPlay(), keys = cp ? cp.personnel : Object.keys(POS);
+  return keys.map((k) => ({ key: k, def: DEFENSE[k], blankPct: Math.round(blankChanceFor(k) * 100) }));
+}
+
 // Whoever filled their meter the most gets the ball; ties favor the more
 // prominent position in the play, then personnel order.
 function leadPlayer() {
@@ -102,7 +142,7 @@ function pick(w, keys) {
 }
 
 function buildGrid() {
-  const keys = currentPlay().personnel, w = weights(), g = [];
+  const keys = currentPlay().personnel, w = weights(), bc = blankChances(), g = [];
   for (let r = 0; r < ROWS; r++) {
     g.push([]);
     for (let c = 0; c < COLS; c++) {
@@ -113,7 +153,7 @@ function buildGrid() {
         (c >= 2 && g[r][c - 1].color === col && g[r][c - 2].color === col) ||
         (r >= 2 && g[r - 1][c].color === col && g[r - 2][c].color === col)
       ));
-      g[r].push({ id: nid(), color: col, spawn: false });
+      g[r].push({ id: nid(), color: col, spawn: false, blank: Math.random() < bc[col] });
     }
   }
   return g;
@@ -125,7 +165,7 @@ function findMatches(grid) {
     let run = 1;
     for (let c = 1; c <= C; c++) {
       const a = c < C ? grid[r][c] : null, b = grid[r][c - 1];
-      if (a && b && a.color === b.color) run++;
+      if (a && b && a.color === b.color && !a.blank && !b.blank) run++;
       else { if (run >= 3) for (let k = 1; k <= run; k++) hit[r + ',' + (c - k)] = 1; run = 1; }
     }
   }
@@ -133,7 +173,7 @@ function findMatches(grid) {
     let run = 1;
     for (let r = 1; r <= R; r++) {
       const a = r < R ? grid[r][c] : null, b = grid[r - 1][c];
-      if (a && b && a.color === b.color) run++;
+      if (a && b && a.color === b.color && !a.blank && !b.blank) run++;
       else { if (run >= 3) for (let k = 1; k <= run; k++) hit[(r - k) + ',' + c] = 1; run = 1; }
     }
   }
@@ -141,7 +181,7 @@ function findMatches(grid) {
 }
 
 function gravity(grid) {
-  const w = weights(), keys = currentPlay().personnel, R = grid.length, C = grid[0].length;
+  const w = weights(), keys = currentPlay().personnel, bc = blankChances(), R = grid.length, C = grid[0].length;
   const g = grid.map((r) => r.slice());
   for (let c = 0; c < C; c++) {
     const st = [];
@@ -149,7 +189,7 @@ function gravity(grid) {
     let i = 0;
     for (let r = R - 1; r >= 0; r--) {
       if (i < st.length) { const gem = st[i++]; gem.spawn = false; g[r][c] = gem; }
-      else g[r][c] = { id: nid(), color: pick(w, keys), spawn: true };
+      else { const col = pick(w, keys); g[r][c] = { id: nid(), color: col, spawn: true, blank: Math.random() < bc[col] }; }
     }
   }
   return g;
@@ -206,6 +246,8 @@ function hike() {
 
 function onCellTap(r, c) {
   if (state.busy || state.phase !== 'board') return;
+  const cell = state.grid[r] && state.grid[r][c];
+  if (cell && cell.blank) return;
   const s = state.selected;
   if (!s) { setState({ selected: { r, c } }); return; }
   if (s.r === r && s.c === c) { setState({ selected: null }); return; }
@@ -233,16 +275,27 @@ async function trySwap(a, b) {
 async function resolveCascade(grid, meters, combo) {
   const m = findMatches(grid);
   if (!m.length) { setState({ grid, meters, busy: false }); afterMove(); return; }
+  const R = grid.length, C = grid[0].length;
   const g2 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
   const nm = { ...meters };
+  const matchSet = new Set(m.map(([r, c]) => r + ',' + c));
+  const blanksToClear = [];
   m.forEach(([r, c]) => {
     const x = g2[r][c];
     if (x) { x.clearing = true; nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL * combo); }
+    [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]].forEach(([nr, nc]) => {
+      if (nr < 0 || nc < 0 || nr >= R || nc >= C) return;
+      const key = nr + ',' + nc;
+      if (matchSet.has(key)) return;
+      const ng = g2[nr][nc];
+      if (ng && ng.blank && !ng.clearing) { ng.clearing = true; blanksToClear.push([nr, nc]); }
+    });
   });
   setState({ grid: g2, meters: nm });
   await sleep(440);
   const g3 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
   m.forEach(([r, c]) => { g3[r][c] = null; });
+  blanksToClear.forEach(([r, c]) => { g3[r][c] = null; });
   const g4 = gravity(g3);
   setState({ grid: g4 });
   await sleep(450);
@@ -362,6 +415,7 @@ function resumeGame() {
   if (state.phase === 'oppdrive') {
     state.phase = 'playcall'; state.possession = 'you'; state.playId = null;
   }
+  state.showMatchup = false;
   render();
 }
 
@@ -453,6 +507,7 @@ function renderPlaycall() {
   return `<div data-screen-label="Play Call" class="screen">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px 8px;border-bottom:3px solid #04060e;background:#0b1228;">
       <div class="pixel" style="font-size:10px;color:#6f86c4;">DRIVE ${S.drive}</div>
+      <div data-action="openMatchup" style="font-family:'Press Start 2P',monospace;font-size:9px;color:#13210f;background:#21c7ff;border:2px solid #04060e;border-radius:6px;padding:6px 9px;cursor:pointer;letter-spacing:.5px;">📋 MATCHUP</div>
       <div class="pixel" style="font-size:10px;color:#ffd23f;">YOU ${S.score} &nbsp;·&nbsp; OPP ${S.oppScore}</div>
     </div>
     <div style="padding:12px 14px 10px;background:#0b1228;border-bottom:3px solid #04060e;">
@@ -470,15 +525,57 @@ function renderPlaycall() {
     <div style="position:absolute;left:0;right:0;bottom:0;padding:14px;background:linear-gradient(transparent,#0a0e1f 26%);">
       <div data-action="${canHike ? 'hike' : ''}" style="${hikeBtnStyle}">${hikeLabel}</div>
     </div>
+    ${S.showMatchup ? renderMatchupModal() : ''}
   </div>`;
 }
 
-function gemOuterStyleObj(r, c, sel) {
-  return { position: 'absolute', width: 'var(--cell)', height: 'var(--cell)', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r}))`, transition: 'transform .44s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: 'pointer' };
+function renderMatchupModal() {
+  const cp = currentPlay();
+  const offense = offenseShare(), defense = defenseImpact();
+  const rows = offense.map((o) => {
+    const d = defense.find((x) => x.key === o.key), p = POS[o.key], df = d.def;
+    const offStars = '★'.repeat(p.skill) + '☆'.repeat(5 - p.skill);
+    const defStars = '★'.repeat(df.skill) + '☆'.repeat(5 - df.skill);
+    const rowStyle = styleStr({ padding: '10px 11px', borderRadius: '8px', border: '3px solid #27365c', background: '#121a32', marginBottom: '8px' });
+    const swatchStyle = styleStr({ width: '32px', height: '32px', flex: '0 0 32px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Press Start 2P',monospace", fontSize: '9px', color: '#fff', background: p.color, border: '2px solid rgba(0,0,0,.45)', borderRadius: '6px', textShadow: '1px 1px 0 rgba(0,0,0,.5)' });
+    return `<div style="${rowStyle}">
+      <div style="display:flex;align-items:center;gap:9px;">
+        <div style="${swatchStyle}">${p.name}</div>
+        <div style="flex:1;">
+          <div style="font-size:18px;color:#fff;">${p.full}</div>
+          <div style="font-size:14px;color:#ffd23f;letter-spacing:1px;">${offStars}</div>
+        </div>
+        <div class="pixel" style="font-size:12px;color:#2fd45e;">${o.pct}% GEMS</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:9px;margin-top:7px;padding-top:7px;border-top:1px dashed #27365c;">
+        <div style="font-size:15px;color:#7f97cf;">vs ${df.full} (${df.name})</div>
+        <div style="font-size:14px;color:#ff8a2b;letter-spacing:1px;">${defStars}</div>
+        <div style="flex:1;"></div>
+        <div class="pixel" style="font-size:12px;color:#ff4d4d;">${d.blankPct}% BLANK</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `<div data-screen-label="Matchup" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,8,18,.86);padding:20px;z-index:20;">
+    <div style="width:100%;max-width:340px;max-height:86%;overflow-y:auto;padding:18px 16px;border-radius:14px;border:4px solid #21c7ff;background:#0b1228;box-shadow:0 0 0 4px #04060e,0 14px 40px rgba(0,0,0,.6);animation:popIn .3s ease-out;">
+      <div class="pixel" style="font-size:14px;color:#21c7ff;margin-bottom:4px;">MATCHUP REPORT</div>
+      <div style="font-size:16px;color:#7f97cf;margin-bottom:14px;">${cp ? cp.name + ' personnel' : 'Pick a play to scout its personnel'}</div>
+      ${rows}
+      <div style="font-size:13px;color:#5870a8;margin:10px 0 4px;line-height:1.4;">Gem % is each player's static share of the board, from skill and how the chosen play features them. Blank % is how often the defender they're matched against locks one of their gems.</div>
+      <div data-action="closeMatchup" style="margin-top:10px;text-align:center;font-family:'Press Start 2P',monospace;font-size:13px;color:#13210f;background:#ffd23f;border:3px solid #04060e;border-radius:8px;padding:12px;box-shadow:0 5px 0 #b58a0c;cursor:pointer;letter-spacing:1px;">CLOSE</div>
+    </div>
+  </div>`;
 }
 
-function gemInnerStyleObj(color, sel, anim) {
-  return { width: '100%', height: '100%', background: color, border: '3px solid rgba(0,0,0,.5)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: 'clamp(8px, calc(var(--cell) * .22), 11px)', textShadow: '1px 1px 0 rgba(0,0,0,.55)', boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: anim };
+function gemOuterStyleObj(r, c, sel, blank) {
+  return { position: 'absolute', width: 'var(--cell)', height: 'var(--cell)', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r}))`, transition: 'transform .44s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: blank ? 'not-allowed' : 'pointer' };
+}
+
+function gemInnerStyleObj(color, sel, anim, blank) {
+  const bg = blank
+    ? `repeating-linear-gradient(45deg, ${color}55 0 6px, #10182f 6px 12px)`
+    : color;
+  return { width: '100%', height: '100%', background: bg, border: '3px solid rgba(0,0,0,.5)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: 'clamp(8px, calc(var(--cell) * .22), 11px)', textShadow: '1px 1px 0 rgba(0,0,0,.55)', opacity: blank ? .75 : 1, boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: anim };
 }
 
 function renderBoard() {
@@ -493,10 +590,10 @@ function renderBoard() {
       const g = S.grid[r][c];
       if (!g) continue;
       const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
-      const outerStyle = styleStr(gemOuterStyleObj(r, c, sel));
+      const outerStyle = styleStr(gemOuterStyleObj(r, c, sel, g.blank));
       const anim = g.clearing ? 'popOut .44s forwards' : 'none';
-      const innerStyle = styleStr(gemInnerStyleObj(p.color, sel, anim));
-      gems.push(`<div data-action="cellTap" data-gem-id="${g.id}" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${p.name}</div></div>`);
+      const innerStyle = styleStr(gemInnerStyleObj(p.color, sel, anim, g.blank));
+      gems.push(`<div data-action="cellTap" data-gem-id="${g.id}" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${g.blank ? '🔒' : p.name}</div></div>`);
     }
   }
   const boardStyle = styleStr({ position: 'relative', width: 'calc(var(--cell) * ' + COLS + ')', height: 'calc(var(--cell) * ' + ROWS + ')' });
@@ -671,6 +768,7 @@ function syncGems(grid) {
       seen.add(g.id);
       const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
       const anim = g.clearing ? 'popOut .44s forwards' : 'none';
+      const label = g.blank ? '🔒' : p.name;
       let entry = gemEls.get(g.id);
       if (!entry) {
         const outer = document.createElement('div');
@@ -684,17 +782,17 @@ function syncGems(grid) {
         if (g.spawn) {
           // Place new gems above the board, fully formed, before the transform
           // transition below animates them falling in — avoids a visible fade-in.
-          entry.outer.setAttribute('style', styleStr({ ...gemOuterStyleObj(r, c, sel), transition: 'none', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r - 1}))` }));
-          entry.inner.setAttribute('style', styleStr(gemInnerStyleObj(p.color, sel, 'none')));
-          entry.inner.textContent = p.name;
+          entry.outer.setAttribute('style', styleStr({ ...gemOuterStyleObj(r, c, sel, g.blank), transition: 'none', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r - 1}))` }));
+          entry.inner.setAttribute('style', styleStr(gemInnerStyleObj(p.color, sel, 'none', g.blank)));
+          entry.inner.textContent = label;
           void entry.outer.offsetHeight;
         }
       }
       entry.outer.dataset.r = r;
       entry.outer.dataset.c = c;
-      entry.outer.setAttribute('style', styleStr(gemOuterStyleObj(r, c, sel)));
-      entry.inner.setAttribute('style', styleStr(gemInnerStyleObj(p.color, sel, anim)));
-      entry.inner.textContent = p.name;
+      entry.outer.setAttribute('style', styleStr(gemOuterStyleObj(r, c, sel, g.blank)));
+      entry.inner.setAttribute('style', styleStr(gemInnerStyleObj(p.color, sel, anim, g.blank)));
+      entry.inner.textContent = label;
     }
   }
   gemEls.forEach((entry, id) => {
@@ -750,6 +848,8 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'cellTap': onCellTap(Number(el.dataset.r), Number(el.dataset.c)); break;
       case 'snap': snap(); break;
       case 'continue': continueAfterResult(); break;
+      case 'openMatchup': setState({ showMatchup: true }); break;
+      case 'closeMatchup': setState({ showMatchup: false }); break;
       default: break;
     }
   });
