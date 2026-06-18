@@ -36,7 +36,7 @@ function playById(id) { return PLAYS.find((p) => p.id === id); }
 function freshState() {
   return {
     phase: 'title', score: 0, oppScore: 0, drive: 1,
-    ballOn: 25, down: 1, toGo: 10, playId: null, featured: null,
+    ballOn: 25, down: 1, toGo: 10, playId: null,
     grid: [], meters: {}, movesLeft: MOVES, selected: null, busy: false,
     result: null, shownYards: 0,
     possession: 'you',
@@ -73,12 +73,25 @@ function currentPlay() { return playById(state.playId); }
 
 // ---------- match-three engine ----------
 function weights() {
-  const pl = currentPlay(), f = state.featured, w = {};
+  const pl = currentPlay(), w = {};
   pl.personnel.forEach((k) => {
     const b = pl.prom[k] || 1, s = POS[k].skill;
-    w[k] = b * (0.7 + s / 10) * (k === f ? 1.7 : 1);
+    w[k] = b * (0.7 + s / 10);
   });
   return w;
+}
+
+// Whoever filled their meter the most gets the ball; ties favor the more
+// prominent position in the play, then personnel order.
+function leadPlayer() {
+  const cp = currentPlay();
+  if (!cp) return null;
+  let best = null;
+  cp.personnel.forEach((k) => {
+    const m = state.meters[k] || 0, prom = cp.prom[k] || 1;
+    if (!best || m > best.m || (m === best.m && prom > best.prom)) best = { k, m, prom };
+  });
+  return best ? best.k : null;
 }
 
 function pick(w, keys) {
@@ -181,11 +194,10 @@ function applyDrive(side, ballOn, down, toGo, yards) {
 // ---------- your turn ----------
 function start() { setState({ phase: 'playcall' }); }
 
-function pickPlay(id) { setState({ playId: id, featured: null }); }
-function feature(k) { setState({ featured: k }); }
+function pickPlay(id) { setState({ playId: id }); }
 
 function hike() {
-  if (!state.playId || !state.featured) return;
+  if (!state.playId) return;
   _id = 1;
   const grid = buildGrid(), meters = {};
   currentPlay().personnel.forEach((k) => { meters[k] = 0; });
@@ -243,7 +255,7 @@ function afterMove() {
 
 function snap() {
   if (state.phase !== 'board') return;
-  const play = currentPlay(), f = state.featured, F = state.meters[f] || 0;
+  const play = currentPlay(), f = leadPlayer(), F = state.meters[f] || 0;
   const res = computeResult(play, F, state.meters.OL || 0);
   const app = applyDrive('you', state.ballOn, state.down, state.toGo, res.yards);
   const headline = app.td ? 'TOUCHDOWN!' : app.turnover ? 'TURNOVER ON DOWNS' : app.firstDown ? 'FIRST DOWN!' : ordinal(app.down) + ' & ' + (app.toGo <= 0 ? 'GOAL' : app.toGo);
@@ -274,7 +286,7 @@ function continueAfterResult() {
   } else if (r.turnover) {
     startOppDrive(state.ballOn);
   } else {
-    setState({ phase: 'playcall', playId: null, featured: null, result: null });
+    setState({ phase: 'playcall', playId: null, result: null });
   }
 }
 
@@ -299,7 +311,7 @@ async function runOppPlay() {
     setState({ oppLog: log });
     await sleep(900);
     setState({
-      phase: 'playcall', possession: 'you', playId: null, featured: null,
+      phase: 'playcall', possession: 'you', playId: null,
       ballOn: newBallOn, down: 1, toGo: Math.min(10, 100 - newBallOn), drive: state.drive + 1,
     });
     return;
@@ -320,13 +332,13 @@ async function runOppPlay() {
   if (app.td) {
     setState({ oppLog: [...log, 'OPPONENT TOUCHDOWN!'], oppScore: state.oppScore + 7 });
     await sleep(1100);
-    setState({ phase: 'playcall', possession: 'you', playId: null, featured: null, ballOn: 25, down: 1, toGo: 10, drive: state.drive + 1 });
+    setState({ phase: 'playcall', possession: 'you', playId: null, ballOn: 25, down: 1, toGo: 10, drive: state.drive + 1 });
     return;
   }
   if (app.turnover) {
     setState({ oppLog: [...log, 'TURNOVER ON DOWNS'] });
     await sleep(1000);
-    setState({ phase: 'playcall', possession: 'you', playId: null, featured: null, ballOn: app.ballOn, down: 1, toGo: Math.min(10, 100 - app.ballOn), drive: state.drive + 1 });
+    setState({ phase: 'playcall', possession: 'you', playId: null, ballOn: app.ballOn, down: 1, toGo: Math.min(10, 100 - app.ballOn), drive: state.drive + 1 });
     return;
   }
   setState({ oppBallOn: app.ballOn, oppDown: app.down, oppToGo: app.toGo });
@@ -348,7 +360,7 @@ function resumeGame() {
   // never resume mid-animation or mid-opponent-drive cleanly — drop back to a stable screen
   if (state.busy) state.busy = false;
   if (state.phase === 'oppdrive') {
-    state.phase = 'playcall'; state.possession = 'you'; state.playId = null; state.featured = null;
+    state.phase = 'playcall'; state.possession = 'you'; state.playId = null;
   }
   render();
 }
@@ -410,16 +422,16 @@ function renderPlaycall() {
     </div>`;
   }).join('');
 
-  let featureSection = '';
+  let personnelSection = '';
   if (cp) {
-    const rows = cp.personnel.map((k) => {
-      const sel = S.featured === k, prom = cp.prom[k] || 1;
+    const chips2 = cp.personnel.map((k) => {
+      const prom = cp.prom[k] || 1;
       const tag = prom >= 2.5 ? 'PRIMARY' : prom >= 1.4 ? 'SUPPORT' : 'DECOY';
-      const chipStyle = styleStr({ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 11px', borderRadius: '9px', cursor: 'pointer', border: '3px solid ' + (sel ? '#ffd23f' : '#27365c'), background: sel ? '#1d2748' : '#121a32', boxShadow: sel ? '0 0 0 3px rgba(255,210,63,.25)' : 'none', transition: 'all .12s' });
+      const chipStyle = styleStr({ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 11px', borderRadius: '9px', border: '3px solid #27365c', background: '#121a32' });
       const swatchStyle = styleStr({ width: '40px', height: '40px', flex: '0 0 40px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Press Start 2P',monospace", fontSize: '11px', color: '#fff', background: POS[k].color, border: '3px solid rgba(0,0,0,.45)', borderRadius: '7px', textShadow: '1px 1px 0 rgba(0,0,0,.5)', boxShadow: 'inset 2px 2px 0 rgba(255,255,255,.4),inset -3px -3px 0 rgba(0,0,0,.3)' });
-      const tagStyle = styleStr({ fontFamily: "'Press Start 2P',monospace", fontSize: '7px', padding: '4px 6px', borderRadius: '4px', color: sel ? '#0a0e1f' : '#8fb4ff', background: sel ? '#ffd23f' : '#1c2848' });
+      const tagStyle = styleStr({ fontFamily: "'Press Start 2P',monospace", fontSize: '7px', padding: '4px 6px', borderRadius: '4px', color: '#8fb4ff', background: '#1c2848' });
       const stars = '★'.repeat(POS[k].skill) + '☆'.repeat(5 - POS[k].skill);
-      return `<div data-action="feature" data-pos="${k}" style="${chipStyle}">
+      return `<div style="${chipStyle}">
         <div style="${swatchStyle}">${POS[k].name}</div>
         <div style="flex:1;">
           <div style="font-size:20px;color:#fff;line-height:1;">${POS[k].full}</div>
@@ -428,14 +440,14 @@ function renderPlaycall() {
         <div style="${tagStyle}">${tag}</div>
       </div>`;
     }).join('');
-    featureSection = `
-      <div class="pixel" style="font-size:10px;color:#ffd23f;margin:18px 0 4px;">2 ▸ FEATURE A PLAYER</div>
-      <div style="font-size:17px;color:#7f97cf;margin-bottom:10px;">Your star gets more gems on the board — and decides the play.</div>
-      <div style="display:flex;flex-direction:column;gap:8px;">${rows}</div>`;
+    personnelSection = `
+      <div class="pixel" style="font-size:10px;color:#ffd23f;margin:18px 0 4px;">2 ▸ ON THE FIELD</div>
+      <div style="font-size:17px;color:#7f97cf;margin-bottom:10px;">Whoever you match the most fills their meter fastest — and gets the ball at the snap.</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">${chips2}</div>`;
   }
 
-  const canHike = !!(cp && S.featured);
-  const hikeLabel = canHike ? '▸ HIKE THE BALL' : (cp ? 'PICK A PLAYER TO FEATURE' : 'PICK A PLAY');
+  const canHike = !!cp;
+  const hikeLabel = canHike ? '▸ HIKE THE BALL' : 'PICK A PLAY';
   const hikeBtnStyle = styleStr({ textAlign: 'center', fontFamily: "'Press Start 2P',monospace", fontSize: '13px', padding: '14px', borderRadius: '9px', border: '3px solid #04060e', letterSpacing: '1px', cursor: canHike ? 'pointer' : 'not-allowed', color: canHike ? '#13210f' : '#5870a8', background: canHike ? '#ffd23f' : '#141d36', boxShadow: canHike ? '0 5px 0 #b58a0c' : 'none' });
 
   return `<div data-screen-label="Play Call" class="screen">
@@ -453,7 +465,7 @@ function renderPlaycall() {
     <div style="flex:1;min-height:0;overflow-y:auto;padding:12px 14px 120px;">
       <div class="pixel" style="font-size:10px;color:#ffd23f;margin:2px 0 10px;">1 ▸ CHOOSE YOUR PLAY</div>
       <div style="display:flex;flex-direction:column;gap:9px;">${playCards}</div>
-      ${featureSection}
+      ${personnelSection}
     </div>
     <div style="position:absolute;left:0;right:0;bottom:0;padding:14px;background:linear-gradient(transparent,#0a0e1f 26%);">
       <div data-action="${canHike ? 'hike' : ''}" style="${hikeBtnStyle}">${hikeLabel}</div>
@@ -489,14 +501,15 @@ function renderBoard() {
   }
   const boardStyle = styleStr({ position: 'relative', width: 'calc(var(--cell) * ' + COLS + ')', height: 'calc(var(--cell) * ' + ROWS + ')' });
 
-  const fk = S.featured;
+  const fk = leadPlayer();
   let fMeterHtml = '';
   if (fk) {
     const pct = Math.round(S.meters[fk] || 0);
-    fMeterHtml = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
+    fMeterHtml = `<div class="pixel" style="font-size:9px;color:#7f97cf;margin-bottom:5px;letter-spacing:1px;">BALL CONTROL</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
         <div style="display:flex;align-items:center;gap:7px;">
-          <div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-family:'Press Start 2P',monospace;font-size:9px;color:#fff;background:${POS[fk].color};border:2px solid rgba(0,0,0,.45);border-radius:5px;text-shadow:1px 1px 0 rgba(0,0,0,.5);">${POS[fk].name}</div>
-          <div style="font-size:20px;color:#fff;letter-spacing:1px;white-space:nowrap;">${POS[fk].full}</div>
+          <div id="leaderSwatch" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-family:'Press Start 2P',monospace;font-size:9px;color:#fff;background:${POS[fk].color};border:2px solid rgba(0,0,0,.45);border-radius:5px;text-shadow:1px 1px 0 rgba(0,0,0,.5);">${POS[fk].name}</div>
+          <div id="leaderName" style="font-size:20px;color:#fff;letter-spacing:1px;white-space:nowrap;">${POS[fk].full}</div>
         </div>
         <div id="featureMeterPct" class="pixel" style="font-size:12px;color:#ffd23f;">${pct}%</div>
       </div>
@@ -507,12 +520,12 @@ function renderBoard() {
   }
 
   const roster = (cp ? cp.personnel : []).map((k) => {
-    const sel = S.featured === k, h = Math.round(S.meters[k] || 0);
+    const sel = fk === k, h = Math.round(S.meters[k] || 0);
     return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
       <div style="position:relative;width:100%;height:34px;border:2px solid #04060e;border-radius:4px;overflow:hidden;background:#10182f;display:flex;align-items:flex-end;">
         <div id="rosterBar-${k}" style="width:100%;height:${h}%;background:${POS[k].color};transition:height .18s;"></div>
       </div>
-      <div class="pixel" style="font-size:8px;color:${sel ? '#ffd23f' : '#6f86c4'};">${k}</div>
+      <div id="rosterLabel-${k}" class="pixel" style="font-size:8px;color:${sel ? '#ffd23f' : '#6f86c4'};">${k}</div>
     </div>`;
   }).join('');
 
@@ -625,18 +638,24 @@ function updateBoardScreen() {
     movesEl.textContent = 'MOVES ' + S.movesLeft;
     movesEl.style.color = S.movesLeft <= 2 ? '#ff4d4d' : '#ffd23f';
   }
-  const fk = S.featured;
+  const fk = leadPlayer();
   if (fk) {
     const pct = Math.round(S.meters[fk] || 0);
     const fill = document.getElementById('featureMeterFill');
     const pctEl = document.getElementById('featureMeterPct');
-    if (fill) fill.style.width = pct + '%';
+    const swatch = document.getElementById('leaderSwatch');
+    const nameEl = document.getElementById('leaderName');
+    if (fill) { fill.style.width = pct + '%'; fill.style.background = POS[fk].color; fill.style.boxShadow = '0 0 8px ' + POS[fk].color; }
     if (pctEl) pctEl.textContent = pct + '%';
+    if (swatch) { swatch.style.background = POS[fk].color; swatch.textContent = POS[fk].name; }
+    if (nameEl) nameEl.textContent = POS[fk].full;
   }
   const cp = currentPlay();
   (cp ? cp.personnel : []).forEach((k) => {
     const bar = document.getElementById('rosterBar-' + k);
     if (bar) bar.style.height = Math.round(S.meters[k] || 0) + '%';
+    const label = document.getElementById('rosterLabel-' + k);
+    if (label) label.style.color = (fk === k) ? '#ffd23f' : '#6f86c4';
   });
   syncGems(S.grid);
 }
@@ -719,7 +738,6 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'resumeGame': resumeGame(); break;
       case 'start': start(); break;
       case 'pickPlay': pickPlay(el.dataset.id); break;
-      case 'feature': feature(el.dataset.pos); break;
       case 'hike': hike(); break;
       case 'cellTap': onCellTap(Number(el.dataset.r), Number(el.dataset.c)); break;
       case 'snap': snap(); break;
