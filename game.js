@@ -255,6 +255,21 @@ function onCellTap(r, c) {
   else setState({ selected: { r, c } });
 }
 
+// Swipe a gem directly into a neighbor in the dragged direction, skipping
+// the tap-to-select step.
+function onCellSwipe(r, c, dx, dy) {
+  if (state.busy || state.phase !== 'board') return;
+  const cell = state.grid[r] && state.grid[r][c];
+  if (cell && cell.blank) return;
+  const r2 = r + (Math.abs(dy) > Math.abs(dx) ? Math.sign(dy) : 0);
+  const c2 = c + (Math.abs(dy) > Math.abs(dx) ? 0 : Math.sign(dx));
+  if (r2 < 0 || r2 >= state.grid.length || c2 < 0 || c2 >= state.grid[0].length) return;
+  const target = state.grid[r2][c2];
+  if (target && target.blank) return;
+  if (state.selected) setState({ selected: null });
+  trySwap({ r, c }, { r: r2, c: c2 });
+}
+
 async function trySwap(a, b) {
   const grid = state.grid, g = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
   const t = g[a.r][a.c]; g[a.r][a.c] = g[b.r][b.c]; g[b.r][b.c] = t;
@@ -568,7 +583,7 @@ function renderMatchupModal() {
 }
 
 function gemOuterStyleObj(r, c, sel, blank) {
-  return { position: 'absolute', width: 'var(--cell)', height: 'var(--cell)', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r}))`, transition: 'transform .44s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: blank ? 'not-allowed' : 'pointer' };
+  return { position: 'absolute', width: 'var(--cell)', height: 'var(--cell)', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r}))`, transition: 'transform .44s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: blank ? 'not-allowed' : 'pointer', touchAction: 'none' };
 }
 
 function gemInnerStyleObj(color, sel, anim, blank) {
@@ -845,7 +860,6 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'start': start(); break;
       case 'pickPlay': pickPlay(el.dataset.id); break;
       case 'hike': hike(); break;
-      case 'cellTap': onCellTap(Number(el.dataset.r), Number(el.dataset.c)); break;
       case 'snap': snap(); break;
       case 'continue': continueAfterResult(); break;
       case 'openMatchup': setState({ showMatchup: true }); break;
@@ -853,4 +867,24 @@ document.addEventListener('DOMContentLoaded', () => {
       default: break;
     }
   });
+
+  // Gems get their own pointer handling (mouse + touch) so a drag in any
+  // direction swipes the swap, while a near-stationary press still taps.
+  const SWIPE_PX = 16;
+  let drag = null;
+  const app = document.getElementById('app');
+  app.addEventListener('pointerdown', (e) => {
+    const el = e.target.closest('[data-gem-id]');
+    if (!el) return;
+    drag = { id: e.pointerId, r: Number(el.dataset.r), c: Number(el.dataset.c), x: e.clientX, y: e.clientY, el };
+    el.setPointerCapture(e.pointerId);
+  });
+  app.addEventListener('pointerup', (e) => {
+    if (!drag || drag.id !== e.pointerId) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (Math.hypot(dx, dy) < SWIPE_PX) onCellTap(drag.r, drag.c);
+    else onCellSwipe(drag.r, drag.c, dx, dy);
+    drag = null;
+  });
+  app.addEventListener('pointercancel', () => { drag = null; });
 });
