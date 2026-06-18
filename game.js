@@ -479,7 +479,7 @@ function renderBoard() {
       gems.push(`<div data-action="cellTap" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${p.name}</div></div>`);
     }
   }
-  const boardStyle = styleStr({ position: 'relative', width: 'calc(var(--cell) * ' + COLS + ')', height: 'calc(var(--cell) * ' + ROWS + ')', '--cell': "clamp(20px, min((min(100vw,418px) - 76px)/" + COLS + ", (min(100vh,896px) - 392px)/" + ROWS + "), 54px)" });
+  const boardStyle = styleStr({ position: 'relative', width: 'calc(var(--cell) * ' + COLS + ')', height: 'calc(var(--cell) * ' + ROWS + ')' });
 
   const fk = S.featured;
   let fMeterHtml = '';
@@ -519,12 +519,12 @@ function renderBoard() {
       ${fieldBar(S)}
       <div style="text-align:center;margin-top:5px;font-size:16px;color:#7f97cf;letter-spacing:1px;white-space:nowrap;">BALL ON ${spot}</div>
     </div>
-    <div style="flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;justify-content:safe center;padding:10px 8px;background:radial-gradient(circle at 50% 40%,#0e1a14,#0a0e1f 75%);">
-      <div style="display:flex;align-items:center;justify-content:space-between;width:${boardW};margin-bottom:8px;flex:0 0 auto;">
+    <div id="boardArea" style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 8px;background:radial-gradient(circle at 50% 40%,#0e1a14,#0a0e1f 75%);">
+      <div id="boardMetaRow" style="display:flex;align-items:center;justify-content:space-between;width:${boardW};margin-bottom:8px;flex:0 0 auto;">
         <div style="font-size:17px;color:#7f97cf;letter-spacing:1px;white-space:nowrap;">PLAY: <span style="color:#fff;">${cp ? cp.name : ''}</span></div>
         <div class="pixel" style="font-size:10px;color:${movesColor};">MOVES ${S.movesLeft}</div>
       </div>
-      <div style="position:relative;border:4px solid #04060e;border-radius:10px;background:#16341f;box-shadow:inset 0 0 0 3px #1f4a2c,0 8px 0 rgba(0,0,0,.4);padding:5px;flex:0 0 auto;">
+      <div id="boardCard" style="position:relative;border:4px solid #04060e;border-radius:10px;background:#16341f;box-shadow:inset 0 0 0 3px #1f4a2c,0 8px 0 rgba(0,0,0,.4);padding:5px;flex:0 0 auto;">
         <div style="position:absolute;inset:5px;border-radius:6px;background:repeating-linear-gradient(0deg,transparent 0 13.9%,rgba(255,255,255,.07) 13.9% calc(13.9% + 2px)),repeating-linear-gradient(90deg,transparent 0 13.9%,rgba(255,255,255,.07) 13.9% calc(13.9% + 2px));pointer-events:none;"></div>
         <div style="${boardStyle}">${gems.join('')}</div>
       </div>
@@ -588,7 +588,33 @@ function render() {
   else if (state.phase === 'oppdrive') html = renderOppDrive();
   else html = '';
   app.innerHTML = html;
+  if (state.phase === 'board') fitBoard();
 }
+
+// Measures the actual space available for the gem grid (after layout)
+// and sizes --cell to fit it exactly, so the board never needs to scroll.
+function fitBoard() {
+  const area = document.getElementById('boardArea');
+  const metaRow = document.getElementById('boardMetaRow');
+  const card = document.getElementById('boardCard');
+  if (!area || !card) return;
+  const areaRect = area.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  const metaH = metaRow ? metaRow.getBoundingClientRect().height + 8 : 0;
+  const horizChrome = (cardRect.width - card.clientWidth) || 8;
+  const vertChrome = (cardRect.height - card.clientHeight) || 8;
+  const availW = areaRect.width - horizChrome - 10; // small safety margin
+  const availH = areaRect.height - metaH - vertChrome - 10;
+  let cell = Math.floor(Math.min(availW, availH) / COLS);
+  cell = Math.max(20, Math.min(54, cell));
+  document.documentElement.style.setProperty('--cell', cell + 'px');
+}
+
+let _fitTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_fitTimer);
+  _fitTimer = setTimeout(() => { if (state.phase === 'board') fitBoard(); }, 80);
+});
 
 // ---------- input delegation ----------
 document.addEventListener('DOMContentLoaded', () => {

@@ -48,3 +48,4 @@ html, body { margin: 0; padding: 0; background: #05070f; height: 100%; overflow:
 
 .pixel { font-family: 'Press Start 2P', monospace; }
 .screen { position: absolute; inset: 0; display: flex; flex-direction: column; }
+:root { --cell: 46px; }
