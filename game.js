@@ -20,7 +20,7 @@ const PLAYS = [
   { id: 'pa', name: 'PLAY ACTION', type: 'PASS', desc: 'Fake the run, hit the tight end downfield.', personnel: ['QB', 'TE', 'WR', 'RB', 'OL'], prom: { QB: 2.6, TE: 2.4, WR: 1.8, RB: 1, OL: 1.2 }, base: [3, 11], big: [18, 40], explosive: .34, pass: true },
 ];
 
-const ROWS = 7, COLS = 7, CELL = 50, FILL = 5, MOVES = 6;
+const ROWS = 7, COLS = 7, FILL = 5, MOVES = 6;
 const SAVE_KEY = 'gridironGems:save';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -465,7 +465,7 @@ function renderBoard() {
   const S = state, cp = currentPlay();
   const spot = S.ballOn > 50 ? ('OPP ' + (100 - S.ballOn)) : ('OWN ' + S.ballOn);
   const downDist = ordinal(S.down) + ' & ' + (S.toGo <= 0 ? 'GOAL' : S.toGo);
-  const boardW = (CELL * COLS) + 'px';
+  const boardW = 'calc(var(--cell) * ' + COLS + ')';
 
   const gems = [];
   for (let r = 0; r < S.grid.length; r++) {
@@ -473,13 +473,13 @@ function renderBoard() {
       const g = S.grid[r][c];
       if (!g) continue;
       const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
-      const outerStyle = styleStr({ position: 'absolute', width: CELL + 'px', height: CELL + 'px', transform: `translate(${c * CELL}px,${r * CELL}px)`, transition: 'transform .19s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: 'pointer' });
+      const outerStyle = styleStr({ position: 'absolute', width: 'var(--cell)', height: 'var(--cell)', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r}))`, transition: 'transform .19s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: 'pointer' });
       const anim = g.clearing ? 'popOut .19s forwards' : (g.spawn ? 'gemDrop .28s ease-out' : 'none');
-      const innerStyle = styleStr({ width: '100%', height: '100%', background: p.color, border: '3px solid rgba(0,0,0,.5)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: '11px', textShadow: '1px 1px 0 rgba(0,0,0,.55)', boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: anim });
+      const innerStyle = styleStr({ width: '100%', height: '100%', background: p.color, border: '3px solid rgba(0,0,0,.5)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: 'clamp(8px, calc(var(--cell) * .22), 11px)', textShadow: '1px 1px 0 rgba(0,0,0,.55)', boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: anim });
       gems.push(`<div data-action="cellTap" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${p.name}</div></div>`);
     }
   }
-  const boardStyle = styleStr({ position: 'relative', width: (CELL * COLS) + 'px', height: (CELL * ROWS) + 'px' });
+  const boardStyle = styleStr({ position: 'relative', width: 'calc(var(--cell) * ' + COLS + ')', height: 'calc(var(--cell) * ' + ROWS + ')', '--cell': "clamp(20px, min((min(100vw,418px) - 76px)/" + COLS + ", (min(100vh,896px) - 392px)/" + ROWS + "), 54px)" });
 
   const fk = S.featured;
   let fMeterHtml = '';
