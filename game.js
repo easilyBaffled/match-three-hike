@@ -450,7 +450,7 @@ function renderPlaycall() {
         <div style="font-size:19px;color:#7f97cf;letter-spacing:1px;">BALL ON ${spot}</div>
       </div>
     </div>
-    <div style="flex:1;overflow-y:auto;padding:12px 14px 120px;">
+    <div style="flex:1;min-height:0;overflow-y:auto;padding:12px 14px 120px;">
       <div class="pixel" style="font-size:10px;color:#ffd23f;margin:2px 0 10px;">1 ▸ CHOOSE YOUR PLAY</div>
       <div style="display:flex;flex-direction:column;gap:9px;">${playCards}</div>
       ${featureSection}
@@ -574,7 +574,7 @@ function renderOppDrive() {
       <div class="pixel" style="font-size:13px;color:#ff8a2b;">⛨ OPPONENT'S DRIVE</div>
       <div style="font-size:17px;color:#7f97cf;margin-top:4px;">BALL ON ${spot} · ${ordinal(S.oppDown)} &amp; ${S.oppToGo <= 0 ? 'GOAL' : S.oppToGo}</div>
     </div>
-    <div style="flex:1;overflow-y:auto;padding:14px;">${lines}</div>
+    <div style="flex:1;min-height:0;overflow-y:auto;padding:14px;">${lines}</div>
   </div>`;
 }
 

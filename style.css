@@ -1,5 +1,5 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; padding: 0; background: #05070f; }
+html, body { margin: 0; padding: 0; background: #05070f; height: 100%; overflow: hidden; }
 
 @keyframes gemDrop { 0% { transform: translateY(-46px) scale(.7); opacity: 0; } 55% { opacity: 1; } 80% { transform: translateY(4px) scale(1.04); } 100% { transform: translateY(0) scale(1); opacity: 1; } }
 @keyframes popOut { 0% { transform: scale(1); } 35% { transform: scale(1.28); } 100% { transform: scale(0); opacity: 0; } }
@@ -8,7 +8,8 @@ html, body { margin: 0; padding: 0; background: #05070f; }
 @keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
 
 .stage {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
   width: 100%;
   display: flex;
   align-items: center;
@@ -16,12 +17,14 @@ html, body { margin: 0; padding: 0; background: #05070f; }
   background: radial-gradient(circle at 50% 0%, #11203f 0%, #070b18 60%, #05070f 100%);
   padding: 14px;
   font-family: 'VT323', monospace;
+  overflow: hidden;
 }
 
 .cartridge {
   position: relative;
   width: min(100%, 418px);
-  height: min(100vh, 896px);
+  height: min(calc(100vh - 28px), 896px);
+  height: min(calc(100dvh - 28px), 896px);
   background: linear-gradient(#0c1430, #0a0e1f 60%, #080a16);
   border: 6px solid #04060e;
   border-radius: 22px;
