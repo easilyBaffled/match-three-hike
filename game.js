@@ -205,12 +205,12 @@ async function trySwap(a, b) {
   const grid = state.grid, g = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
   const t = g[a.r][a.c]; g[a.r][a.c] = g[b.r][b.c]; g[b.r][b.c] = t;
   setState({ grid: g, selected: null, busy: true });
-  await sleep(200);
+  await sleep(700);
   if (!findMatches(g).length) {
     const g2 = g.map((row) => row.map((x) => (x ? { ...x } : null)));
     const t2 = g2[a.r][a.c]; g2[a.r][a.c] = g2[b.r][b.c]; g2[b.r][b.c] = t2;
     setState({ grid: g2 });
-    await sleep(200);
+    await sleep(700);
     setState({ busy: false });
     return;
   }
@@ -228,12 +228,12 @@ async function resolveCascade(grid, meters, combo) {
     if (x) { x.clearing = true; nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL * combo); }
   });
   setState({ grid: g2, meters: nm });
-  await sleep(190);
+  await sleep(690);
   const g3 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
   m.forEach(([r, c]) => { g3[r][c] = null; });
   const g4 = gravity(g3);
   setState({ grid: g4 });
-  await sleep(200);
+  await sleep(700);
   await resolveCascade(g4, nm, Math.min(3, combo + 0.5));
 }
 
@@ -462,7 +462,7 @@ function renderPlaycall() {
 }
 
 function gemOuterStyleObj(r, c, sel) {
-  return { position: 'absolute', width: 'var(--cell)', height: 'var(--cell)', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r}))`, transition: 'transform .19s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: 'pointer' };
+  return { position: 'absolute', width: 'var(--cell)', height: 'var(--cell)', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r}))`, transition: 'transform .69s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: 'pointer' };
 }
 
 function gemInnerStyleObj(color, sel, anim) {
@@ -482,7 +482,7 @@ function renderBoard() {
       if (!g) continue;
       const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
       const outerStyle = styleStr(gemOuterStyleObj(r, c, sel));
-      const anim = g.clearing ? 'popOut .19s forwards' : (g.spawn ? 'gemDrop .28s ease-out' : 'none');
+      const anim = g.clearing ? 'popOut .69s forwards' : (g.spawn ? 'gemDrop .78s ease-out' : 'none');
       const innerStyle = styleStr(gemInnerStyleObj(p.color, sel, anim));
       gems.push(`<div data-action="cellTap" data-gem-id="${g.id}" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${p.name}</div></div>`);
     }
@@ -651,7 +651,7 @@ function syncGems(grid) {
       if (!g) continue;
       seen.add(g.id);
       const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
-      const anim = g.clearing ? 'popOut .19s forwards' : (g.spawn ? 'gemDrop .28s ease-out' : 'none');
+      const anim = g.clearing ? 'popOut .69s forwards' : (g.spawn ? 'gemDrop .78s ease-out' : 'none');
       let entry = gemEls.get(g.id);
       if (!entry) {
         const outer = document.createElement('div');
