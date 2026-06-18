@@ -461,6 +461,14 @@ function renderPlaycall() {
   </div>`;
 }
 
+function gemOuterStyleObj(r, c, sel) {
+  return { position: 'absolute', width: 'var(--cell)', height: 'var(--cell)', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r}))`, transition: 'transform .19s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: 'pointer' };
+}
+
+function gemInnerStyleObj(color, sel, anim) {
+  return { width: '100%', height: '100%', background: color, border: '3px solid rgba(0,0,0,.5)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: 'clamp(8px, calc(var(--cell) * .22), 11px)', textShadow: '1px 1px 0 rgba(0,0,0,.55)', boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: anim };
+}
+
 function renderBoard() {
   const S = state, cp = currentPlay();
   const spot = S.ballOn > 50 ? ('OPP ' + (100 - S.ballOn)) : ('OWN ' + S.ballOn);
@@ -473,10 +481,10 @@ function renderBoard() {
       const g = S.grid[r][c];
       if (!g) continue;
       const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
-      const outerStyle = styleStr({ position: 'absolute', width: 'var(--cell)', height: 'var(--cell)', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r}))`, transition: 'transform .19s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: 'pointer' });
+      const outerStyle = styleStr(gemOuterStyleObj(r, c, sel));
       const anim = g.clearing ? 'popOut .19s forwards' : (g.spawn ? 'gemDrop .28s ease-out' : 'none');
-      const innerStyle = styleStr({ width: '100%', height: '100%', background: p.color, border: '3px solid rgba(0,0,0,.5)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: 'clamp(8px, calc(var(--cell) * .22), 11px)', textShadow: '1px 1px 0 rgba(0,0,0,.55)', boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: anim });
-      gems.push(`<div data-action="cellTap" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${p.name}</div></div>`);
+      const innerStyle = styleStr(gemInnerStyleObj(p.color, sel, anim));
+      gems.push(`<div data-action="cellTap" data-gem-id="${g.id}" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${p.name}</div></div>`);
     }
   }
   const boardStyle = styleStr({ position: 'relative', width: 'calc(var(--cell) * ' + COLS + ')', height: 'calc(var(--cell) * ' + ROWS + ')' });
@@ -490,10 +498,10 @@ function renderBoard() {
           <div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-family:'Press Start 2P',monospace;font-size:9px;color:#fff;background:${POS[fk].color};border:2px solid rgba(0,0,0,.45);border-radius:5px;text-shadow:1px 1px 0 rgba(0,0,0,.5);">${POS[fk].name}</div>
           <div style="font-size:20px;color:#fff;letter-spacing:1px;white-space:nowrap;">${POS[fk].full}</div>
         </div>
-        <div class="pixel" style="font-size:12px;color:#ffd23f;">${pct}%</div>
+        <div id="featureMeterPct" class="pixel" style="font-size:12px;color:#ffd23f;">${pct}%</div>
       </div>
       <div style="position:relative;height:18px;border:3px solid #04060e;border-radius:5px;overflow:hidden;background:#10182f;">
-        <div style="height:100%;width:${pct}%;background:${POS[fk].color};transition:width .18s;box-shadow:0 0 8px ${POS[fk].color};"></div>
+        <div id="featureMeterFill" style="height:100%;width:${pct}%;background:${POS[fk].color};transition:width .18s;box-shadow:0 0 8px ${POS[fk].color};"></div>
         <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.25),transparent 50%);pointer-events:none;"></div>
       </div>`;
   }
@@ -502,7 +510,7 @@ function renderBoard() {
     const sel = S.featured === k, h = Math.round(S.meters[k] || 0);
     return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
       <div style="position:relative;width:100%;height:34px;border:2px solid #04060e;border-radius:4px;overflow:hidden;background:#10182f;display:flex;align-items:flex-end;">
-        <div style="width:100%;height:${h}%;background:${POS[k].color};transition:height .18s;"></div>
+        <div id="rosterBar-${k}" style="width:100%;height:${h}%;background:${POS[k].color};transition:height .18s;"></div>
       </div>
       <div class="pixel" style="font-size:8px;color:${sel ? '#ffd23f' : '#6f86c4'};">${k}</div>
     </div>`;
@@ -522,11 +530,11 @@ function renderBoard() {
     <div id="boardArea" style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 8px;background:radial-gradient(circle at 50% 40%,#0e1a14,#0a0e1f 75%);">
       <div id="boardMetaRow" style="display:flex;align-items:center;justify-content:space-between;width:${boardW};margin-bottom:8px;flex:0 0 auto;">
         <div style="font-size:17px;color:#7f97cf;letter-spacing:1px;white-space:nowrap;">PLAY: <span style="color:#fff;">${cp ? cp.name : ''}</span></div>
-        <div class="pixel" style="font-size:10px;color:${movesColor};">MOVES ${S.movesLeft}</div>
+        <div id="movesLabel" class="pixel" style="font-size:10px;color:${movesColor};">MOVES ${S.movesLeft}</div>
       </div>
       <div id="boardCard" style="position:relative;border:4px solid #04060e;border-radius:10px;background:#16341f;box-shadow:inset 0 0 0 3px #1f4a2c,0 8px 0 rgba(0,0,0,.4);padding:5px;flex:0 0 auto;">
         <div style="position:absolute;inset:5px;border-radius:6px;background:repeating-linear-gradient(0deg,transparent 0 13.9%,rgba(255,255,255,.07) 13.9% calc(13.9% + 2px)),repeating-linear-gradient(90deg,transparent 0 13.9%,rgba(255,255,255,.07) 13.9% calc(13.9% + 2px));pointer-events:none;"></div>
-        <div style="${boardStyle}">${gems.join('')}</div>
+        <div id="gemLayer" style="${boardStyle}">${gems.join('')}</div>
       </div>
     </div>
     <div style="padding:10px 14px 14px;background:#0b1228;border-top:3px solid #04060e;flex:0 0 auto;">
@@ -578,8 +586,17 @@ function renderOppDrive() {
   </div>`;
 }
 
+let lastPhase = null;
+const gemEls = new Map();
+
 function render() {
   const app = document.getElementById('app');
+  const stayingOnBoard = state.phase === 'board' && lastPhase === 'board' && document.getElementById('gemLayer');
+  if (stayingOnBoard) {
+    updateBoardScreen();
+    lastPhase = state.phase;
+    return;
+  }
   let html;
   if (state.phase === 'title') html = renderTitle();
   else if (state.phase === 'playcall') html = renderPlaycall();
@@ -588,7 +605,77 @@ function render() {
   else if (state.phase === 'oppdrive') html = renderOppDrive();
   else html = '';
   app.innerHTML = html;
-  if (state.phase === 'board') fitBoard();
+  if (state.phase === 'board') {
+    gemEls.clear();
+    app.querySelectorAll('[data-gem-id]').forEach((el) => {
+      gemEls.set(el.dataset.gemId, { outer: el, inner: el.firstElementChild });
+    });
+    fitBoard();
+  }
+  lastPhase = state.phase;
+}
+
+// Updates the board screen's dynamic bits (meters, moves, gems) by mutating
+// existing DOM nodes in place, so CSS transitions on gem `transform` can
+// actually animate between old and new positions instead of snapping.
+function updateBoardScreen() {
+  const S = state;
+  const movesEl = document.getElementById('movesLabel');
+  if (movesEl) {
+    movesEl.textContent = 'MOVES ' + S.movesLeft;
+    movesEl.style.color = S.movesLeft <= 2 ? '#ff4d4d' : '#ffd23f';
+  }
+  const fk = S.featured;
+  if (fk) {
+    const pct = Math.round(S.meters[fk] || 0);
+    const fill = document.getElementById('featureMeterFill');
+    const pctEl = document.getElementById('featureMeterPct');
+    if (fill) fill.style.width = pct + '%';
+    if (pctEl) pctEl.textContent = pct + '%';
+  }
+  const cp = currentPlay();
+  (cp ? cp.personnel : []).forEach((k) => {
+    const bar = document.getElementById('rosterBar-' + k);
+    if (bar) bar.style.height = Math.round(S.meters[k] || 0) + '%';
+  });
+  syncGems(S.grid);
+}
+
+function syncGems(grid) {
+  const layer = document.getElementById('gemLayer');
+  if (!layer) return;
+  const S = state, seen = new Set();
+  for (let r = 0; r < grid.length; r++) {
+    for (let c = 0; c < (grid[r] || []).length; c++) {
+      const g = grid[r][c];
+      if (!g) continue;
+      seen.add(g.id);
+      const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
+      const anim = g.clearing ? 'popOut .19s forwards' : (g.spawn ? 'gemDrop .28s ease-out' : 'none');
+      let entry = gemEls.get(g.id);
+      if (!entry) {
+        const outer = document.createElement('div');
+        outer.dataset.action = 'cellTap';
+        outer.dataset.gemId = g.id;
+        const inner = document.createElement('div');
+        outer.appendChild(inner);
+        layer.appendChild(outer);
+        entry = { outer, inner };
+        gemEls.set(g.id, entry);
+      }
+      entry.outer.dataset.r = r;
+      entry.outer.dataset.c = c;
+      entry.outer.setAttribute('style', styleStr(gemOuterStyleObj(r, c, sel)));
+      entry.inner.setAttribute('style', styleStr(gemInnerStyleObj(p.color, sel, anim)));
+      entry.inner.textContent = p.name;
+    }
+  }
+  gemEls.forEach((entry, id) => {
+    if (!seen.has(id)) {
+      entry.outer.remove();
+      gemEls.delete(id);
+    }
+  });
 }
 
 // Measures the actual space available for the gem grid (after layout)
