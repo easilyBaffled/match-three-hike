@@ -16,16 +16,16 @@ identity have been added, and several numbers/colors changed in the rebuild.
 A **drive** is a series of plays until you score or turn the ball over. A **play** is one full cycle:
 
 1. **Call a play.** Pick 1 of 6 plays. The play defines which 5 of the 7 positions take the field
-   and how prominent each one is.
-2. **Feature a player.** Choose one of those 5 positions to star. Their gem appears far more often
-   on the board, and their meter is the one that decides the play's outcome.
-3. **Match gems (6 moves).** Swap adjacent gems to make rows/columns of 3+. Cleared gems fill
-   their position's meter. Chained cascades fill it faster.
-4. **Hike (or snap early).** When moves run out, the play resolves automatically; the player may
-   also choose to snap before moves run out. The featured player's meter level sets the odds.
-5. **Resolve & advance.** The outcome (loss / ordinary gain / explosive gain) plays out, yardage
+   and how prominent each one is. All 5 are eligible to get the ball — there's no upfront pick.
+2. **Match gems (6 moves).** Swap adjacent gems to make rows/columns of 3+. Cleared gems fill
+   their position's meter. Chained cascades fill it faster. Whichever position you match the
+   most pulls ahead.
+3. **Hike (or snap early).** When moves run out, the play resolves automatically; the player may
+   also choose to snap before moves run out. Whoever has the fullest meter at that moment gets
+   the ball, and their meter level sets the odds.
+4. **Resolve & advance.** The outcome (loss / ordinary gain / explosive gain) plays out, yardage
    animates onto the field, down & distance update.
-6. **Drive ends → the defense plays.** On a touchdown or a turnover on downs, possession flips:
+5. **Drive ends → the defense plays.** On a touchdown or a turnover on downs, possession flips:
    the opponent runs a simulated drive of its own (see §7) before control returns to the player.
 
 ## 2. Screen flow
@@ -33,14 +33,14 @@ A **drive** is a series of plays until you score or turn the ball over. A **play
 Five screens, all sharing one continuous game state:
 
 - **Title** — start a new game, or continue a saved one.
-- **Play Call** — choose play, then choose featured player.
+- **Play Call** — choose a play; the personnel it puts on the field are shown for reference.
 - **Board** — the match-three puzzle.
 - **Result** — outcome reveal for the play just run.
 - **Defense** — the opponent's possession plays out as an automated log.
 
 ```
 Title      → tap "Start"/"Continue" →            Play Call
-Play Call  → pick play + feature, hike →          Board
+Play Call  → pick a play, hike →                  Board
 Board      → moves exhausted, or early snap →     Result
 Result     → ordinary gain / first down →         Play Call (same drive, next down)
 Result     → touchdown →                          Defense (opponent kicks off from their own 25)
@@ -113,14 +113,22 @@ Two separate weighting systems run the whole game: which gems show up, and what 
 **Gem frequency.** For each of the 5 personnel on the field, the relative chance its gem appears
 on the board is:
 
-> `weight = prominence × (0.7 + skill ÷ 10) × (this position is featured ? 1.7 : 1)`
+> `weight = prominence × (0.7 + skill ÷ 10)`
 
-A gem color is then drawn by weighted random choice across the active personnel. Featuring a
-position gives it a 70% boost — a primary back who's also featured can come to dominate roughly
-half the board.
+A gem color is then drawn by weighted random choice across the active personnel. There's no
+upfront boost for any one position — the board's mix is set entirely by the play you called, and
+every position is equally available to chase from the first move.
 
-**Outcome resolution (on snap).** Let *F* be the featured player's meter (0–100) and *OL* be the
-O-line's meter. The outcome is rolled in three tiers, checked in order:
+**Who gets the ball.** At the moment of the snap, whichever position has the fullest meter
+carries the play — there is no pre-snap pick. If two or more positions are tied, the more
+prominent one (per the play's weighting) wins the tie; if that's also tied, the play's personnel
+order breaks it. In practice this means you're reading the board as you match, not committing to
+a plan before you see a single gem: a play called for its run-blocking can still end up in an
+unexpected pair of hands if that's where the matches fell.
+
+**Outcome resolution (on snap).** Let *F* be the ball-carrier's meter (0–100) — the position that
+won the snap above — and *OL* be the O-line's meter. The outcome is rolled in three tiers,
+checked in order:
 
 1. **Negative play** — chance = `clamp(4%, 32%, 30% − F÷360 − OL÷100×12%)`. On a pass, 30% of
    these are sacks (a loss of 3–8 yards) and the rest are incompletions (0 yards). On a run,
@@ -133,14 +141,15 @@ O-line's meter. The outcome is rolled in three tiers, checked in order:
 
 A full meter therefore does three things at once: it nearly eliminates negative plays, pushes an
 ordinary gain toward the top of its range, and maximizes the chance of an explosive play. The
-O-line's meter independently suppresses negative plays no matter who is featured — protection
-matters even when the spotlight is on someone else.
+O-line's meter independently suppresses negative plays no matter who ends up carrying the play —
+protection matters even when the spotlight lands on someone else.
 
-*Worked example — Power Iso, featuring the RB:* the RB's gem frequency weight comes out roughly
-6×, the OL's roughly 2.6×, with FB/TE/QB trailing — in practice the featured RB occupies about
-half the board, making it realistic to fill its meter inside 6 moves. With that meter maxed and a
-healthy OL meter, the negative-play chance bottoms out near its floor, the explosive chance rises
-to roughly 1 in 5, and the ordinary gain lands at the top of the play's base range.
+*Worked example — Power Iso:* before a single move, the RB is already the most prominent target
+(weight ≈ 3.2 vs. the OL's ≈ 2.6 and FB/TE/QB trailing), so matching evenly tends to leave the RB
+in the lead by default — but a player who deliberately chases OL or FB gems instead can hand the
+play to them. Whoever ends up with the fullest meter at the snap gets the same payoff curve: near
+its floor on negative plays, roughly 1-in-5 odds of an explosive at a maxed meter, and an ordinary
+gain at the top of the play's base range.
 
 ## 7. Drive, downs, and scoring
 
@@ -164,7 +173,7 @@ defense.
 
 - The opponent uses the **same outcome model** described in §6, but instead of building meters
   through matching, each of its plays rolls a randomized "execution" level (a stand-in for the
-  featured meter) and a randomized protection level (standing in for the O-line meter), so its
+  ball-carrier's meter) and a randomized protection level (standing in for the O-line meter), so its
   performance varies play to play rather than being earned.
 - **4th-down decision.** If the opponent faces 4th down with more than 2 yards to go *and* is
   still in their own half (more than 50 yards from scoring), they will punt — a kick of roughly
@@ -194,7 +203,6 @@ half-finished animation.
 | Moves per play | 6 | Lower = harder to fill meters before the snap. |
 | Fill per cleared gem | 5 (× combo) | — |
 | Combo multiplier | 1 → 3, +0.5 per chain | Caps cascades from scaling forever. |
-| Featured frequency bump | 1.7× | How hard featuring a position skews the board. |
 | Skill-to-frequency term | 0.7 + skill ÷ 10 | How much skill rating affects gem frequency. |
 | Negative-play base chance | 30% | At an empty meter. |
 | Negative-play chance range | 4%–32% | Floor and ceiling regardless of meters. |
@@ -230,7 +238,7 @@ screen for a powered-on LCD feel.
 
 **Layout & feel**
 - The entire game fits on one screen without page-level scrolling; the only places that scroll
-  internally are the play-call list (plays + feature picker) and the defense's play-by-play log.
+  internally are the play-call list (plays + personnel reference) and the defense's play-by-play log.
 - The match-three grid always sizes itself to fit the available space exactly, so it never
   overflows or forces a scroll, across a wide range of phone screen heights.
 - The title screen shows four gems gently bobbing above the game's title treatment, with a
@@ -245,9 +253,10 @@ screen for a powered-on LCD feel.
 - The result of a play appears as a centered card over a dimmed board, color-coded by outcome
   (green for a touchdown, red for a turnover, amber otherwise), with the yardage gained counting
   up or down digit by digit before the player continues.
-- Meters are shown as glowing color-matched progress bars: a large one for the featured player,
-  and a row of smaller vertical bars for the rest of the personnel on the field, so the player can
-  see at a glance how full every position's meter is, not just the one they're chasing.
+- Meters are shown as glowing color-matched progress bars: a large one for whoever currently holds
+  the lead (the live ball-carrier), and a row of smaller vertical bars for the rest of the personnel
+  on the field, so the player can see at a glance how full every position's meter is, not just the
+  one currently in the lead.
 
 ## 12. Out of scope / not yet built
 
