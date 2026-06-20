@@ -477,7 +477,7 @@ async function activateSpecial(grid, gem, pos, targetColor) {
     const x = g2[r][c];
     if (x) {
       x.clearing = true;
-      if (x.color !== NEUTRAL) nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL);
+      if (x.color !== NEUTRAL) { nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL); x.flyTo = x.color; }
     }
   });
   setState({ grid: g2, meters: nm });
@@ -509,7 +509,7 @@ async function resolveCascade(grid, meters, combo, anchorHint) {
     }
     if (x) {
       x.clearing = true;
-      if (x.color !== NEUTRAL) nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL * combo);
+      if (x.color !== NEUTRAL) { nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL * combo); x.flyTo = x.color; }
     }
     [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]].forEach(([nr, nc]) => {
       if (nr < 0 || nc < 0 || nr >= R || nc >= C) return;
@@ -963,7 +963,7 @@ function renderBoard() {
   const roster = (cp ? cp.personnel : []).map((k) => {
     const sel = fk === k, h = Math.round(S.meters[k] || 0);
     return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
-      <div style="position:relative;width:100%;height:34px;border:2px solid #04060e;border-radius:4px;overflow:hidden;background:#10182f;display:flex;align-items:flex-end;">
+      <div id="meterBox-${k}" style="position:relative;width:100%;height:34px;border:2px solid #04060e;border-radius:4px;overflow:hidden;background:#10182f;display:flex;align-items:flex-end;">
         <div id="rosterBar-${k}" style="width:100%;height:${h}%;background:${POS[k].color};transition:height .18s;"></div>
       </div>
       <div id="rosterLabel-${k}" class="pixel" style="font-size:8px;color:${sel ? '#ffd23f' : '#6f86c4'};">${k}</div>
@@ -1065,6 +1065,12 @@ function render() {
     app.querySelectorAll('[data-gem-id]').forEach((el) => {
       gemEls.set(el.dataset.gemId, { outer: el, inner: el.firstElementChild });
     });
+    // Sits as a sibling of .screen (not inside #boardArea, which clips
+    // overflow) so cleared gems can fly past the board edge to a meter.
+    const fx = document.createElement('div');
+    fx.id = 'fxLayer';
+    fx.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:55;overflow:visible;';
+    app.appendChild(fx);
     fitBoard();
   }
   lastPhase = state.phase;
@@ -1133,6 +1139,16 @@ function syncGems(grid) {
           void entry.outer.offsetHeight;
         }
       }
+      // A clear that fills a meter flies there instead of just popping —
+      // the gem becomes the meter's fill rather than disappearing in place.
+      if (g.clearing && g.flyTo && !entry.flying) {
+        entry.flying = true;
+        spawnFlyingGem(g.flyTo, label, entry.inner.getBoundingClientRect());
+        entry.outer.dataset.r = r;
+        entry.outer.dataset.c = c;
+        entry.outer.style.display = 'none';
+        continue;
+      }
       entry.outer.dataset.r = r;
       entry.outer.dataset.c = c;
       entry.outer.setAttribute('style', styleStr(gemOuterStyleObj(r, c, sel, g.blank)));
@@ -1146,6 +1162,49 @@ function syncGems(grid) {
       gemEls.delete(id);
     }
   });
+}
+
+// Clones the clearing gem into the top-level fx overlay (so it isn't
+// clipped by #boardArea) and animates it hopping up off the board, then
+// flying into its color's meter box while shrinking and fading away.
+function spawnFlyingGem(color, label, rect) {
+  const fxLayer = document.getElementById('fxLayer');
+  const target = document.getElementById('meterBox-' + color);
+  if (!fxLayer || !target) return;
+  const fxRect = fxLayer.getBoundingClientRect();
+  const tRect = target.getBoundingClientRect();
+  const size = Math.min(rect.width, rect.height) * 0.82;
+  const startLeft = rect.left - fxRect.left + (rect.width - size) / 2;
+  const startTop = rect.top - fxRect.top + (rect.height - size) / 2;
+  const endLeft = tRect.left - fxRect.left + tRect.width / 2 - size / 2;
+  const endTop = tRect.top - fxRect.top + tRect.height / 2 - size / 2;
+  const swatch = (POS[color] || {}).color || color;
+
+  const clone = document.createElement('div');
+  clone.textContent = label;
+  clone.style.cssText = styleStr({
+    position: 'absolute', left: startLeft + 'px', top: startTop + 'px',
+    width: size + 'px', height: size + 'px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: swatch, color: '#fff', fontFamily: "'Press Start 2P',monospace",
+    fontSize: 'clamp(8px, ' + Math.round(size * 0.32) + 'px, 14px)',
+    border: '3px solid rgba(0,0,0,.5)', borderRadius: '8px',
+    boxShadow: 'inset 2px 2px 0 rgba(255,255,255,.45),inset -3px -3px 0 rgba(0,0,0,.3),0 0 10px ' + swatch,
+    textShadow: '1px 1px 0 rgba(0,0,0,.55)', opacity: '1', transform: 'scale(1) translateY(0)',
+    transition: 'transform .16s ease-out', zIndex: '5',
+  });
+  fxLayer.appendChild(clone);
+
+  // Stage 1: a quick hop up off the board. Stage 2: float into the meter,
+  // shrinking and fading as it arrives, like it's draining into the fill.
+  requestAnimationFrame(() => { clone.style.transform = 'scale(1.15) translateY(-14px)'; });
+  setTimeout(() => {
+    clone.style.transition = 'left .32s cubic-bezier(.35,.4,.25,1), top .32s cubic-bezier(.35,.4,.25,1), transform .32s ease-in, opacity .26s ease-in .08s';
+    clone.style.left = endLeft + 'px';
+    clone.style.top = endTop + 'px';
+    clone.style.transform = 'scale(.25) translateY(0)';
+    clone.style.opacity = '0';
+  }, 130);
+  setTimeout(() => clone.remove(), 470);
 }
 
 // Measures the actual space available for the gem grid (after layout)
