@@ -64,6 +64,10 @@ rating (1–5) that raises both how often its gem appears and its ceiling on out
 | OL       | O-Line         | Gold              | 4    |
 | FB       | Fullback       | Red               | 2    |
 
+The skill ratings above belong to each position's **starter**. Every position also has a bench of
+backups with their own (lower) skill and their own stamina — see §10 for the full depth chart and
+how skill and exhaustion interact with gem frequency.
+
 ## 4. Playbook
 
 Six plays. Each declares its 5 personnel, a **prominence** weight per position (drives how often
@@ -141,7 +145,11 @@ Two separate weighting systems run the whole game: which gems show up, and what 
 **Gem frequency.** For each of the 5 personnel on the field, the relative chance its gem appears
 on the board is:
 
-> `weight = prominence × (0.7 + skill ÷ 10)`
+> `weight = prominence × (0.7 + skill ÷ 10) × staminaFactor`
+
+where *skill* is whichever player is currently active at that position (starter or a swapped-in
+backup) and *staminaFactor* reflects how exhausted that same player currently is — see §10 for both
+systems. At full stamina, *staminaFactor* is 1 and the formula behaves exactly as it always has.
 
 A gem color is then drawn by weighted random choice across the active personnel. There's no
 upfront boost for any one position — the board's mix is set entirely by the play you called, and
@@ -238,7 +246,47 @@ defense.
 - A short pause separates each simulated play and each drive-ending event, so the log reads like a
   real series of snaps rather than an instant result.
 
-## 10. Save & resume
+## 10. Exhaustion & roster management
+
+Every position fields more than one player. Touches wear the active player down; only benching
+them lets them recover, so a drive becomes a real allocation problem — keep riding your hot
+ball-carrier, or spell them before they're a shell of themselves.
+
+**Depth charts.** RB and WR each carry 3 players (a starter plus 2 backups); QB, OL, SL, TE, and FB
+each carry 2 (a starter plus 1 backup). Every backup loses 1 point of skill per slot behind the
+starter, floored at 1 (e.g. RB starts at skill 5, so its depth chart is 5 → 4 → 3). Every roster
+slot — starters and backups alike — is a named player, not a generic label; gems on the board
+still show only the position's code, regardless of who's currently active there.
+
+**Stamina.** Each roster slot tracks its own stamina, 0–100, starting at 100:
+
+- **−25** to the active slot's stamina at every snap *that player wins* (i.e. they end up as the
+  play's ball-carrier). Stamina never recovers on its own while a player stays active — the only
+  way down is up, until you bench them.
+- **+25** to every *other* position's benched (non-active) slots, once per offensive play you run.
+  Only your own plays tick this recovery; the defense's simulated drive does not advance it, so a
+  player you bench stays exactly where you left them until it's your turn to snap again.
+- Stamina never pushes a gem's frequency to zero. A position's gem-frequency weight (§6) is
+  multiplied by a **stamina factor** of `0.4 + 0.6 × (stamina ÷ 100)`, so a fully exhausted player
+  still shows up — just 60% less often than at full stamina.
+
+**Skill propagation.** Swapping in a backup makes their (lower) skill the live number everywhere
+skill already mattered: gem frequency (§6), how often a defender locks one of their gems (§6's
+blank chance), the matchup report's star rating and gem-%, and the star rating shown on the
+play-call personnel chips. A tired or thin-depth starter you bench in favor of a less-skilled
+backup is a real tradeoff, not a cosmetic one.
+
+**Managing the roster.** A **ROSTER** button next to **MATCHUP** on the Play Call screen opens a
+depth-chart modal for all 7 positions — each player's name, skill (stars), and current stamina
+(a color-coded bar: green/amber/red as it drains), with the active player marked. Tapping any
+player swaps them in immediately; swaps are free and unlimited, but only available between plays,
+on the Play Call screen — once you're on the board for a play, the lineup is locked in. The
+play-call personnel chips also carry a compact stamina sliver and the active player's name, so you
+can see who's about to take the field, and how tired they are, without opening the modal. The
+defense has no roster or stamina of its own — its randomized execution/protection rolls (§9) stand
+in for everything a real depth chart would otherwise represent.
+
+## 11. Save & resume
 
 The game state is saved automatically any time you're not on the title screen, so leaving and
 returning puts you back exactly where you left off — same drive, same score, same board if you
@@ -248,7 +296,7 @@ or in the middle of an opponent's possession, the game instead resumes you at th
 decision point — the play-call screen, with the ball where it was — rather than restoring a
 half-finished animation.
 
-## 11. Tuning constants
+## 12. Tuning constants
 
 | Constant | Value | Effect |
 |---|---|---|
@@ -266,8 +314,14 @@ half-finished animation.
 | Momentum charge — explosive play | +25 | Caps at 100; doesn't charge from ordinary clears. |
 | Momentum charge — first down | +15 | Stacks with the explosive charge on the same play. |
 | Momentum spend effect | forced explosive | Cashing in skips straight to the explosive tier on the next play. |
+| RB/WR bench depth | 3 (starter + 2 backups) | Deepest depth charts in the game. |
+| QB/OL/SL/TE/FB bench depth | 2 (starter + 1 backup) | Shallower depth charts. |
+| Backup skill falloff | −1 per depth slot (floor 1) | Backups are always less skilled than the starter. |
+| Stamina drain per touch | −25 to the active slot | Only the play's ball-carrier pays the cost. |
+| Stamina recovery per offensive play | +25 to all benched slots | Opponent drives don't trigger this. |
+| Stamina-to-frequency term | 0.4 + 0.6 × (stamina ÷ 100) | Floors gem frequency at 40% of normal, never zero. |
 
-## 12. Visual design
+## 13. Visual design
 
 A backlit handheld-console presentation: the whole game lives inside a single rounded device
 frame ("cartridge") centered on a dark gradient backdrop, bordered in near-black with a glowing
@@ -313,8 +367,13 @@ screen for a powered-on LCD feel.
   the lead (the live ball-carrier), and a row of smaller vertical bars for the rest of the personnel
   on the field, so the player can see at a glance how full every position's meter is, not just the
   one currently in the lead.
+- The roster modal lists each position's depth chart as tappable rows — name, star rating, and a
+  color-coded stamina bar (green/amber/red) that shrinks as a player tires — with the active player
+  picked out by a gold border and arrow. The play-call personnel chips carry a slimmer version of
+  the same stamina bar plus the active player's name, so their condition is visible without opening
+  the modal.
 
-## 13. Out of scope / not yet built
+## 14. Out of scope / not yet built
 
 - Player-side 4th-down decisions (punting or attempting a field goal) — on offense, failing to
   convert by 4th down is always a turnover on downs.

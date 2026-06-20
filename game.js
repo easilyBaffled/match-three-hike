@@ -23,6 +23,23 @@ const DEFENSE = {
   FB: { name: 'LB', full: 'Linebacker', skill: 3 },
 };
 
+// Depth chart per position: index 0 is the default starter (skill matches
+// POS[k].skill). Each slot behind it loses 1 skill point (floor 1) and
+// builds up its own stamina independent of whoever else is active.
+const ROSTER_NAMES = {
+  QB: ['Derek Sloan', 'Marcus Tate'],
+  RB: ['Jalen Ortiz', 'Cole Barrett', 'Trey Higgins'],
+  WR: ['Devon Marsh', 'Reggie Vance', 'Tariq Lewis'],
+  SL: ['Eli Sanderson', 'Brody Kim'],
+  TE: ['Owen Castillo', 'Pete Donovan'],
+  OL: ['Gus Whitfield', 'Ray Holloman'],
+  FB: ['Hank Delgado', 'Cliff Norris'],
+};
+const ROSTER = {};
+Object.keys(POS).forEach((k) => {
+  ROSTER[k] = ROSTER_NAMES[k].map((name, i) => ({ name, skill: Math.max(1, POS[k].skill - i) }));
+});
+
 const PLAYS = [
   { id: 'iso', name: 'POWER ISO', type: 'RUN', desc: 'Pound it up the gut behind the fullback.', personnel: ['OL', 'RB', 'FB', 'TE', 'QB'], prom: { RB: 3, OL: 2.4, FB: 1.6, TE: 1.2, QB: .7 }, base: [2, 7], big: [12, 22], explosive: .18, pass: false },
   { id: 'slant', name: 'QUICK SLANT', type: 'PASS', desc: 'Rhythm throw to the receiver crossing the middle.', personnel: ['QB', 'WR', 'SL', 'TE', 'OL'], prom: { WR: 3, QB: 2, SL: 1.6, TE: 1, OL: 1.2 }, base: [4, 9], big: [14, 30], explosive: .28, pass: true },
@@ -45,6 +62,13 @@ const nid = () => 'g' + (_id++);
 function playById(id) { return PLAYS.find((p) => p.id === id); }
 
 // ---------- state ----------
+// Every roster slot starts active on the starter (index 0) at full stamina.
+function freshRoster() {
+  const r = {};
+  Object.keys(ROSTER).forEach((k) => { r[k] = { active: 0, stamina: ROSTER[k].map(() => 100) }; });
+  return r;
+}
+
 function freshState() {
   return {
     phase: 'title', score: 0, oppScore: 0, drive: 1,
@@ -54,7 +78,8 @@ function freshState() {
     momentum: 0, forcedExplosive: false,
     possession: 'you',
     oppBallOn: 0, oppDown: 1, oppToGo: 10, oppLog: [],
-    showMatchup: false,
+    showMatchup: false, showRoster: false,
+    roster: freshRoster(),
   };
 }
 
@@ -65,7 +90,10 @@ function loadSave() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    // Saves from before the roster/stamina system existed won't have this key.
+    if (!parsed.roster) parsed.roster = freshRoster();
+    return parsed;
   } catch (e) { return null; }
 }
 
@@ -85,12 +113,39 @@ function setState(patch) {
 
 function currentPlay() { return playById(state.playId); }
 
+// ---------- roster / stamina ----------
+function activeRosterEntry(k) { return ROSTER[k][state.roster[k].active]; }
+function activeSkill(k) { return activeRosterEntry(k).skill; }
+function activeStamina(k) { return state.roster[k].stamina[state.roster[k].active]; }
+// Exhausted gems are 60% less frequent at 0 stamina, never fully suppressed.
+function staminaFactor(k) { return 0.4 + 0.6 * (activeStamina(k) / 100); }
+
+// Called once per snap. The carrier's active slot pays for the touch; every
+// other position's benched slots recover, since only benching restores
+// stamina. Active slots that didn't carry the play neither gain nor lose.
+function tickRoster(carrierKey) {
+  Object.keys(state.roster).forEach((k) => {
+    const r = state.roster[k];
+    r.stamina = r.stamina.map((s, i) => {
+      if (k === carrierKey && i === r.active) return clamp(0, 100, s - 25);
+      if (i !== r.active) return clamp(0, 100, s + 25);
+      return s;
+    });
+  });
+}
+
+function swapRoster(posKey, idx) {
+  if (state.roster[posKey].active === idx) return;
+  state.roster[posKey].active = idx;
+  setState({});
+}
+
 // ---------- match-three engine ----------
 function weights() {
   const pl = currentPlay(), w = {};
   pl.personnel.forEach((k) => {
-    const b = pl.prom[k] || 1, s = POS[k].skill;
-    w[k] = b * (0.7 + s / 10);
+    const b = pl.prom[k] || 1, s = activeSkill(k);
+    w[k] = b * (0.7 + s / 10) * staminaFactor(k);
   });
   return w;
 }
@@ -98,7 +153,7 @@ function weights() {
 // Odds that a gem of this offensive color spawns "blank" (uncatchable),
 // driven purely by the skill gap against the defender who covers it.
 function blankChanceFor(k) {
-  return clamp(0.04, 0.4, 0.06 + (DEFENSE[k].skill - POS[k].skill) * 0.07);
+  return clamp(0.04, 0.4, 0.06 + (DEFENSE[k].skill - activeSkill(k)) * 0.07);
 }
 
 function blankChances() {
@@ -112,7 +167,7 @@ function blankChances() {
 function offenseShare() {
   const cp = currentPlay(), keys = cp ? cp.personnel : Object.keys(POS), prom = cp ? cp.prom : {};
   const w = {};
-  keys.forEach((k) => { w[k] = (prom[k] || 1) * (0.7 + POS[k].skill / 10); });
+  keys.forEach((k) => { w[k] = (prom[k] || 1) * (0.7 + activeSkill(k) / 10); });
   const total = keys.reduce((s, k) => s + w[k], 0);
   return keys.map((k) => ({ key: k, pct: Math.round((w[k] / total) * 100) }));
 }
@@ -462,6 +517,7 @@ function afterMove() {
 function snap() {
   if (state.phase !== 'board') return;
   const play = currentPlay(), f = leadPlayer(), F = state.meters[f] || 0;
+  tickRoster(f);
   const res = computeResult(play, F, state.meters.OL || 0, state.forcedExplosive);
   const app = applyDrive('you', state.ballOn, state.down, state.toGo, res.yards);
   const headline = app.td ? 'TOUCHDOWN!' : app.turnover ? 'TURNOVER ON DOWNS' : app.firstDown ? 'FIRST DOWN!' : ordinal(app.down) + ' & ' + (app.toGo <= 0 ? 'GOAL' : app.toGo);
@@ -677,12 +733,18 @@ function renderPlaycall() {
       const chipStyle = styleStr({ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 11px', borderRadius: '9px', border: '3px solid #27365c', background: '#121a32' });
       const swatchStyle = styleStr({ width: '40px', height: '40px', flex: '0 0 40px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Press Start 2P',monospace", fontSize: '11px', color: '#fff', background: POS[k].color, border: '3px solid rgba(0,0,0,.45)', borderRadius: '7px', textShadow: '1px 1px 0 rgba(0,0,0,.5)', boxShadow: 'inset 2px 2px 0 rgba(255,255,255,.4),inset -3px -3px 0 rgba(0,0,0,.3)' });
       const tagStyle = styleStr({ fontFamily: "'Press Start 2P',monospace", fontSize: '7px', padding: '4px 6px', borderRadius: '4px', color: '#8fb4ff', background: '#1c2848' });
-      const stars = '★'.repeat(POS[k].skill) + '☆'.repeat(5 - POS[k].skill);
+      const stars = '★'.repeat(activeSkill(k)) + '☆'.repeat(5 - activeSkill(k));
+      const stamina = activeStamina(k);
+      const staminaColor = stamina >= 60 ? '#2fd45e' : stamina >= 25 ? '#ffd23f' : '#ff4d4d';
+      const staminaBarOuter = styleStr({ width: '100%', height: '5px', borderRadius: '3px', background: '#04060e', overflow: 'hidden', marginTop: '5px' });
+      const staminaBarInner = styleStr({ width: stamina + '%', height: '100%', background: staminaColor });
       return `<div style="${chipStyle}">
         <div style="${swatchStyle}">${POS[k].name}</div>
-        <div style="flex:1;">
+        <div style="flex:1;min-width:0;">
           <div style="font-size:20px;color:#fff;line-height:1;">${POS[k].full}</div>
-          <div style="font-size:15px;color:#ffd23f;letter-spacing:1px;">${stars}</div>
+          <div style="font-size:13px;color:#9fb3dd;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(activeRosterEntry(k).name)}</div>
+          <div style="font-size:15px;color:#ffd23f;letter-spacing:1px;margin-top:2px;">${stars}</div>
+          <div style="${staminaBarOuter}"><div style="${staminaBarInner}"></div></div>
         </div>
         <div style="${tagStyle}">${tag}</div>
       </div>`;
@@ -700,7 +762,10 @@ function renderPlaycall() {
   return `<div data-screen-label="Play Call" class="screen">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px 8px;border-bottom:3px solid #04060e;background:#0b1228;">
       <div class="pixel" style="font-size:10px;color:#6f86c4;">DRIVE ${S.drive}</div>
-      <div data-action="openMatchup" style="font-family:'Press Start 2P',monospace;font-size:9px;color:#13210f;background:#21c7ff;border:2px solid #04060e;border-radius:6px;padding:6px 9px;cursor:pointer;letter-spacing:.5px;">📋 MATCHUP</div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div data-action="openMatchup" style="font-family:'Press Start 2P',monospace;font-size:9px;color:#13210f;background:#21c7ff;border:2px solid #04060e;border-radius:6px;padding:6px 9px;cursor:pointer;letter-spacing:.5px;">📋 MATCHUP</div>
+        <div data-action="openRoster" style="font-family:'Press Start 2P',monospace;font-size:9px;color:#0a0e1f;background:#2fd45e;border:2px solid #04060e;border-radius:6px;padding:6px 9px;cursor:pointer;letter-spacing:.5px;">🏈 ROSTER</div>
+      </div>
       <div class="pixel" style="font-size:10px;color:#ffd23f;">YOU ${S.score} &nbsp;·&nbsp; OPP ${S.oppScore}</div>
     </div>
     <div style="padding:12px 14px 10px;background:#0b1228;border-bottom:3px solid #04060e;">
@@ -720,6 +785,50 @@ function renderPlaycall() {
       <div data-action="${canHike ? 'hike' : ''}" style="${hikeBtnStyle}">${hikeLabel}</div>
     </div>
     ${S.showMatchup ? renderMatchupModal() : ''}
+    ${S.showRoster ? renderRosterModal() : ''}
+  </div>`;
+}
+
+function renderRosterModal() {
+  const sections = Object.keys(POS).map((k) => {
+    const p = POS[k];
+    const rows = ROSTER[k].map((entry, i) => {
+      const active = state.roster[k].active === i;
+      const stamina = state.roster[k].stamina[i];
+      const stars = '★'.repeat(entry.skill) + '☆'.repeat(5 - entry.skill);
+      const barColor = stamina >= 60 ? '#2fd45e' : stamina >= 25 ? '#ffd23f' : '#ff4d4d';
+      const rowStyle = styleStr({ display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 9px', borderRadius: '7px', border: '2px solid ' + (active ? '#ffd23f' : '#27365c'), background: active ? '#1b2748' : '#121a32', marginTop: '6px', cursor: 'pointer' });
+      const barOuter = styleStr({ flex: '1', height: '8px', borderRadius: '4px', background: '#04060e', overflow: 'hidden' });
+      const barInner = styleStr({ width: stamina + '%', height: '100%', background: barColor });
+      return `<div data-action="swapRoster" data-pos="${k}" data-idx="${i}" style="${rowStyle}">
+        <div style="flex:0 0 16px;text-align:center;font-family:'Press Start 2P',monospace;font-size:9px;color:${active ? '#ffd23f' : '#5870a8'};">${active ? '▶' : ''}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:15px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(entry.name)}</div>
+          <div style="font-size:12px;color:#ffd23f;letter-spacing:1px;">${stars}</div>
+        </div>
+        <div style="flex:0 0 70px;">
+          <div style="${barOuter}"><div style="${barInner}"></div></div>
+          <div style="font-size:10px;color:#7f97cf;text-align:right;margin-top:2px;">${Math.round(stamina)}</div>
+        </div>
+      </div>`;
+    }).join('');
+    const swatchStyle = styleStr({ width: '28px', height: '28px', flex: '0 0 28px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Press Start 2P',monospace", fontSize: '8px', color: '#fff', background: p.color, border: '2px solid rgba(0,0,0,.45)', borderRadius: '6px', textShadow: '1px 1px 0 rgba(0,0,0,.5)' });
+    return `<div style="margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="${swatchStyle}">${p.name}</div>
+        <div style="font-size:17px;color:#fff;">${p.full}</div>
+      </div>
+      ${rows}
+    </div>`;
+  }).join('');
+
+  return `<div data-screen-label="Roster" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,8,18,.86);padding:20px;z-index:20;">
+    <div style="width:100%;max-width:340px;max-height:86%;overflow-y:auto;padding:18px 16px;border-radius:14px;border:4px solid #2fd45e;background:#0b1228;box-shadow:0 0 0 4px #04060e,0 14px 40px rgba(0,0,0,.6);animation:popIn .3s ease-out;">
+      <div class="pixel" style="font-size:14px;color:#2fd45e;margin-bottom:4px;">ROSTER</div>
+      <div style="font-size:16px;color:#7f97cf;margin-bottom:10px;">Tap a player to swap them in. Benched players recover stamina; active players don't.</div>
+      ${sections}
+      <div data-action="closeRoster" style="margin-top:6px;text-align:center;font-family:'Press Start 2P',monospace;font-size:13px;color:#13210f;background:#ffd23f;border:3px solid #04060e;border-radius:8px;padding:12px;box-shadow:0 5px 0 #b58a0c;cursor:pointer;letter-spacing:1px;">CLOSE</div>
+    </div>
   </div>`;
 }
 
@@ -728,7 +837,7 @@ function renderMatchupModal() {
   const offense = offenseShare(), defense = defenseImpact();
   const rows = offense.map((o) => {
     const d = defense.find((x) => x.key === o.key), p = POS[o.key], df = d.def;
-    const offStars = '★'.repeat(p.skill) + '☆'.repeat(5 - p.skill);
+    const offStars = '★'.repeat(activeSkill(o.key)) + '☆'.repeat(5 - activeSkill(o.key));
     const defStars = '★'.repeat(df.skill) + '☆'.repeat(5 - df.skill);
     const rowStyle = styleStr({ padding: '10px 11px', borderRadius: '8px', border: '3px solid #27365c', background: '#121a32', marginBottom: '8px' });
     const swatchStyle = styleStr({ width: '32px', height: '32px', flex: '0 0 32px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Press Start 2P',monospace", fontSize: '9px', color: '#fff', background: p.color, border: '2px solid rgba(0,0,0,.45)', borderRadius: '6px', textShadow: '1px 1px 0 rgba(0,0,0,.5)' });
@@ -1056,6 +1165,9 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'cashMomentum': cashMomentum(); break;
       case 'openMatchup': setState({ showMatchup: true }); break;
       case 'closeMatchup': setState({ showMatchup: false }); break;
+      case 'openRoster': setState({ showRoster: true }); break;
+      case 'closeRoster': setState({ showRoster: false }); break;
+      case 'swapRoster': swapRoster(el.dataset.pos, Number(el.dataset.idx)); break;
       default: break;
     }
   });
