@@ -104,10 +104,17 @@ A 7×7 grid where every gem represents one of the current play's 5 personnel.
 - **Filling meters.** Every cleared gem adds points to its position's meter (capped at 100),
   multiplied by the current combo. A cell that converts into a special piece does not clear or
   fill a meter on creation — it fills (and dumps into others) when later activated.
+- **Neutral gems.** Alongside the 5 personnel colors, a 6th, uncolored gem spawns on the board
+  (14% of cells, independent of any position's weight). It selects, swaps, and matches exactly
+  like a personnel gem — including chaining into line clearers, bombs, and color bombs — and is
+  never locked blank, since no defender covers a position that isn't there. The only difference:
+  it belongs to no position, so clearing it never fills a meter. It's pure board clutter, diluting
+  the grid so every match has to work a little harder to find personnel you actually want.
 - **Gravity & cascades.** Gems above a cleared cell fall to fill the gap; new gems spawn at the
-  top using the same weighting as the original deal. If the fall creates new matches, they
-  resolve automatically and the combo multiplier increases, up to a cap, before settling. Special
-  pieces only enter the board this way — they are never part of the weighted-random deal.
+  top using the same weighting as the original deal (including the neutral gem's flat chance). If
+  the fall creates new matches, they resolve automatically and the combo multiplier increases, up
+  to a cap, before settling. Special pieces only enter the board this way — they are never part of
+  the weighted-random deal.
 - **Move budget.** Each play allows 6 moves. Once they're spent, the play resolves automatically
   after a short beat; the player may also snap early at any time.
 - **Input lock.** While gems are swapping, clearing, falling, or a special piece is activating and
@@ -302,6 +309,7 @@ half-finished animation.
 |---|---|---|
 | Board size | 7 × 7 | — |
 | Moves per play | 6 | Lower = harder to fill meters before the snap. |
+| Neutral gem chance | 14% per cell | Higher = more board clutter, harder to fill any meter. |
 | Fill per cleared gem | 5 (× combo) | — |
 | Combo multiplier | 1 → 3, +0.5 per chain | Caps cascades from scaling forever. |
 | Skill-to-frequency term | 0.7 + skill ÷ 10 | How much skill rating affects gem frequency. |
@@ -338,7 +346,9 @@ screen for a powered-on LCD feel.
   amber as the neutral/default highlight.
 - Position gem colors are saturated and distinct — violet, green, cyan, pink, orange, gold, and
   red — each gem rendered as a beveled chunk with a dark outline and an inset highlight/shadow for
-  a tactile, chunky look, never a flat swatch.
+  a tactile, chunky look, never a flat swatch. The neutral gem uses the same beveled treatment in a
+  desaturated slate gray with a plain diamond glyph, so it visibly reads as "no one's color" next
+  to the rest of the board.
 
 **Type**
 - A blocky pixel-art display face is used for headings, HUD labels, buttons, and short emphatic

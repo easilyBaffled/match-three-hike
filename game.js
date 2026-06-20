@@ -52,6 +52,12 @@ const PLAYS = [
 const ROWS = 7, COLS = 7, FILL = 5, MOVES = 6;
 const SAVE_KEY = 'gridironGems:save';
 
+// The uncolored gem: spawns alongside the play's personnel, swaps and
+// matches exactly like any other color, but belongs to no position — clearing
+// it never fills a meter. Pure board clutter that costs you moves.
+const NEUTRAL = 'N', NEUTRAL_CHANCE = 0.14;
+const NEUTRAL_GEM = { name: '◆', full: 'Neutral', color: '#8a93a6' };
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const clamp = (lo, hi, v) => Math.max(lo, Math.min(hi, v));
 const ordinal = (n) => ['', '1ST', '2ND', '3RD', '4TH'][n] || (n + 'TH');
@@ -199,6 +205,19 @@ function pick(w, keys) {
   return keys[keys.length - 1];
 }
 
+// Rolls the neutral gem's flat chance before falling back to the weighted
+// personnel pick — neutral dilutes the board independent of any position's
+// weight, rather than being one more color in the weighted pool.
+function pickColor(w, keys) {
+  if (Math.random() < NEUTRAL_CHANCE) return NEUTRAL;
+  return pick(w, keys);
+}
+
+// Neutral gems belong to no defender, so they can never be locked blank.
+function rollBlank(col, bc) {
+  return col !== NEUTRAL && Math.random() < bc[col];
+}
+
 function buildGrid() {
   const keys = currentPlay().personnel, w = weights(), bc = blankChances(), g = [];
   for (let r = 0; r < ROWS; r++) {
@@ -206,12 +225,12 @@ function buildGrid() {
     for (let c = 0; c < COLS; c++) {
       let col, t = 0;
       do {
-        col = pick(w, keys); t++;
+        col = pickColor(w, keys); t++;
       } while (t < 25 && (
         (c >= 2 && g[r][c - 1].color === col && g[r][c - 2].color === col) ||
         (r >= 2 && g[r - 1][c].color === col && g[r - 2][c].color === col)
       ));
-      g[r].push({ id: nid(), color: col, spawn: false, blank: Math.random() < bc[col] });
+      g[r].push({ id: nid(), color: col, spawn: false, blank: rollBlank(col, bc) });
     }
   }
   return g;
@@ -319,7 +338,7 @@ function gravity(grid) {
     let i = 0;
     for (let r = R - 1; r >= 0; r--) {
       if (i < st.length) { const gem = st[i++]; gem.spawn = false; g[r][c] = gem; }
-      else { const col = pick(w, keys); g[r][c] = { id: nid(), color: col, spawn: true, blank: Math.random() < bc[col] }; }
+      else { const col = pickColor(w, keys); g[r][c] = { id: nid(), color: col, spawn: true, blank: rollBlank(col, bc) }; }
     }
   }
   return g;
@@ -456,7 +475,10 @@ async function activateSpecial(grid, gem, pos, targetColor) {
   cells.forEach((key) => {
     const [r, c] = key.split(',').map(Number);
     const x = g2[r][c];
-    if (x) { x.clearing = true; nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL); }
+    if (x) {
+      x.clearing = true;
+      if (x.color !== NEUTRAL) nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL);
+    }
   });
   setState({ grid: g2, meters: nm });
   await sleep(440);
@@ -485,7 +507,10 @@ async function resolveCascade(grid, meters, combo, anchorHint) {
       if (x) { x.special = becoming.type; x.color = becoming.color; }
       return;
     }
-    if (x) { x.clearing = true; nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL * combo); }
+    if (x) {
+      x.clearing = true;
+      if (x.color !== NEUTRAL) nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL * combo);
+    }
     [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]].forEach(([nr, nc]) => {
       if (nr < 0 || nc < 0 || nr >= R || nc >= C) return;
       const nkey = nr + ',' + nc;
@@ -647,6 +672,11 @@ function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 function styleStr(o) {
   return Object.entries(o).map(([k, v]) => `${k.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase())}:${v}`).join(';');
 }
+
+// A gem's color is either a personnel position or the neutral filler — this
+// is the one place that distinction collapses back into "what does it look
+// like and what's its label."
+function gemVisual(color) { return color === NEUTRAL ? NEUTRAL_GEM : POS[color]; }
 
 function renderTitle() {
   const gemColors = ['#7b5cff', '#2fd45e', '#21c7ff', '#ffd23f'];
@@ -902,7 +932,7 @@ function renderBoard() {
     for (let c = 0; c < (S.grid[r] || []).length; c++) {
       const g = S.grid[r][c];
       if (!g) continue;
-      const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
+      const p = gemVisual(g.color), sel = S.selected && S.selected.r === r && S.selected.c === c;
       const outerStyle = styleStr(gemOuterStyleObj(r, c, sel, g.blank));
       const anim = g.clearing ? 'popOut .44s forwards' : 'none';
       const innerStyle = styleStr(gemInnerStyleObj(p.color, sel, anim, g.blank, g.special));
@@ -1081,7 +1111,7 @@ function syncGems(grid) {
       const g = grid[r][c];
       if (!g) continue;
       seen.add(g.id);
-      const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
+      const p = gemVisual(g.color), sel = S.selected && S.selected.r === r && S.selected.c === c;
       const anim = g.clearing ? 'popOut .44s forwards' : 'none';
       const label = g.blank ? '🔒' : g.special ? SPECIAL_ICON[g.special] : p.name;
       let entry = gemEls.get(g.id);
