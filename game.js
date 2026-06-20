@@ -51,6 +51,7 @@ function freshState() {
     ballOn: 25, down: 1, toGo: 10, playId: null,
     grid: [], meters: {}, movesLeft: MOVES, selected: null, busy: false,
     result: null, shownYards: 0,
+    momentum: 0, forcedExplosive: false,
     possession: 'you',
     oppBallOn: 0, oppDown: 1, oppToGo: 10, oppLog: [],
     showMatchup: false,
@@ -122,12 +123,14 @@ function defenseImpact() {
 }
 
 // Whoever filled their meter the most gets the ball; ties favor the more
-// prominent position in the play, then personnel order.
+// prominent position in the play, then personnel order. The O-line blocks,
+// it never carries, so it's excluded from the snap regardless of its meter.
 function leadPlayer() {
   const cp = currentPlay();
   if (!cp) return null;
   let best = null;
   cp.personnel.forEach((k) => {
+    if (k === 'OL') return;
     const m = state.meters[k] || 0, prom = cp.prom[k] || 1;
     if (!best || m > best.m || (m === best.m && prom > best.prom)) best = { k, m, prom };
   });
@@ -196,7 +199,11 @@ function gravity(grid) {
 }
 
 // ---------- outcome / drive model (shared by you & the defense) ----------
-function computeResult(play, F, olMeter) {
+function computeResult(play, F, olMeter, forceExplosive) {
+  if (forceExplosive) {
+    const y = play.big[0] + Math.floor(Math.random() * (play.big[1] - play.big[0] + 1));
+    return { yards: y, label: play.pass ? 'Caught in stride — gone!' : 'Breaks free downfield!', type: 'BIG' };
+  }
   const stuffP = clamp(0.04, 0.32, 0.30 - F / 360 - (olMeter || 0) / 100 * 0.12);
   if (Math.random() < stuffP) {
     if (play.pass) {
@@ -324,15 +331,27 @@ function afterMove() {
 function snap() {
   if (state.phase !== 'board') return;
   const play = currentPlay(), f = leadPlayer(), F = state.meters[f] || 0;
-  const res = computeResult(play, F, state.meters.OL || 0);
+  const res = computeResult(play, F, state.meters.OL || 0, state.forcedExplosive);
   const app = applyDrive('you', state.ballOn, state.down, state.toGo, res.yards);
   const headline = app.td ? 'TOUCHDOWN!' : app.turnover ? 'TURNOVER ON DOWNS' : app.firstDown ? 'FIRST DOWN!' : ordinal(app.down) + ' & ' + (app.toGo <= 0 ? 'GOAL' : app.toGo);
   const score = app.td ? state.score + 7 : state.score;
+  let momentum = state.momentum;
+  if (res.type === 'BIG') momentum = Math.min(100, momentum + 25);
+  if (app.firstDown) momentum = Math.min(100, momentum + 15);
+  if (app.td || app.turnover) momentum = 0;
   setState({
     phase: 'result', ballOn: app.ballOn, down: app.down, toGo: app.toGo, score, shownYards: 0,
+    momentum, forcedExplosive: false,
     result: { label: res.label, type: res.type, headline, td: app.td, turnover: app.turnover, yards: res.yards, meterPct: Math.round(F), featured: f },
   });
   animateYards(res.yards);
+}
+
+// Cash in a full momentum meter before the next snap — forces that play's
+// outcome roll straight to the explosive tier. Drive-level, player's choice.
+function cashMomentum() {
+  if (state.momentum < 100 || state.phase !== 'playcall') return;
+  setState({ momentum: 0, forcedExplosive: true });
 }
 
 let _yt = null;
@@ -425,6 +444,8 @@ function resumeGame() {
   const saved = loadSave();
   if (!saved) { newGame(); return; }
   state = saved;
+  if (state.momentum == null) state.momentum = 0;
+  if (state.forcedExplosive == null) state.forcedExplosive = false;
   // never resume mid-animation or mid-opponent-drive cleanly — drop back to a stable screen
   if (state.busy) state.busy = false;
   if (state.phase === 'oppdrive') {
@@ -468,6 +489,32 @@ function fieldBar(S) {
     <div style="position:absolute;top:0;right:0;bottom:0;width:8%;background:rgba(47,212,94,.32);border-left:2px solid #2fd45e;"></div>
     <div style="${fdLine}"></div>
     <div style="${ballMark}"></div>
+  </div>`;
+}
+
+// Drive-level momentum meter HUD — visually distinct from the per-position
+// meter rows (fire accent, its own panel) so it doesn't read as an 8th
+// position. `withCash` shows the cash-in button when full (play-call only);
+// the board screen instead shows an "armed" badge once spent.
+function momentumBar(S, withCash) {
+  const pct = Math.round(S.momentum);
+  const full = pct >= 100;
+  const fillStyle = styleStr({ height: '100%', width: pct + '%', background: 'linear-gradient(90deg,#ff8a2b,#ff4d4d)', boxShadow: full ? '0 0 10px #ff8a2b' : 'none', transition: 'width .3s' });
+  const cashBtn = (withCash && full)
+    ? `<div data-action="cashMomentum" style="margin-top:7px;text-align:center;font-family:'Press Start 2P',monospace;font-size:11px;color:#13210f;background:linear-gradient(90deg,#ff8a2b,#ffd23f);border:3px solid #04060e;border-radius:7px;padding:9px;cursor:pointer;letter-spacing:1px;box-shadow:0 4px 0 #b1471a;animation:floaty 1.6s ease-in-out infinite;">🔥 CASH IN MOMENTUM</div>`
+    : '';
+  const armedBadge = S.forcedExplosive
+    ? `<div class="pixel" style="margin-top:6px;text-align:center;font-size:9px;color:#ff8a2b;letter-spacing:1px;">🔥 EXPLOSIVE LOCKED IN FOR THIS PLAY</div>`
+    : '';
+  return `<div style="padding:9px 11px;border-radius:8px;border:3px solid ${full ? '#ff8a2b' : '#3a2c1f'};background:#160f0c;margin-top:8px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
+      <div class="pixel" style="font-size:9px;color:#ff8a2b;letter-spacing:1px;">⚡ MOMENTUM</div>
+      <div class="pixel" style="font-size:10px;color:${full ? '#ffd23f' : '#a87a55'};">${pct}%</div>
+    </div>
+    <div style="position:relative;height:12px;border:2px solid #04060e;border-radius:4px;overflow:hidden;background:#0c1226;">
+      <div style="${fillStyle}"></div>
+    </div>
+    ${cashBtn}${armedBadge}
   </div>`;
 }
 
@@ -531,6 +578,7 @@ function renderPlaycall() {
         <div class="pixel" style="font-size:13px;color:#fff;">${downDist}</div>
         <div style="font-size:19px;color:#7f97cf;letter-spacing:1px;">BALL ON ${spot}</div>
       </div>
+      ${momentumBar(S, true)}
     </div>
     <div style="flex:1;min-height:0;overflow-y:auto;padding:12px 14px 120px;">
       <div class="pixel" style="font-size:10px;color:#ffd23f;margin:2px 0 10px;">1 ▸ CHOOSE YOUR PLAY</div>
@@ -651,6 +699,7 @@ function renderBoard() {
       </div>
       ${fieldBar(S)}
       <div style="text-align:center;margin-top:5px;font-size:16px;color:#7f97cf;letter-spacing:1px;white-space:nowrap;">BALL ON ${spot}</div>
+      ${momentumBar(S, false)}
     </div>
     <div id="boardArea" style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 8px;background:radial-gradient(circle at 50% 40%,#0e1a14,#0a0e1f 75%);">
       <div id="boardMetaRow" style="display:flex;align-items:center;justify-content:space-between;width:${boardW};margin-bottom:8px;flex:0 0 auto;">
@@ -862,6 +911,7 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'hike': hike(); break;
       case 'snap': snap(); break;
       case 'continue': continueAfterResult(); break;
+      case 'cashMomentum': cashMomentum(); break;
       case 'openMatchup': setState({ showMatchup: true }); break;
       case 'closeMatchup': setState({ showMatchup: false }); break;
       default: break;
