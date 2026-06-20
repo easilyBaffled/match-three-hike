@@ -26,7 +26,7 @@ A **drive** is a series of plays until you score or turn the ball over. A **play
 4. **Resolve & advance.** The outcome (loss / ordinary gain / explosive gain) plays out, yardage
    animates onto the field, down & distance update.
 5. **Drive ends → the defense plays.** On a touchdown or a turnover on downs, possession flips:
-   the opponent runs a simulated drive of its own (see §7) before control returns to the player.
+   the opponent runs a simulated drive of its own (see §9) before control returns to the player.
 
 ## 2. Screen flow
 
@@ -65,7 +65,7 @@ rating (1–5) that raises both how often its gem appears and its ceiling on out
 | FB       | Fullback       | Red               | 2    |
 
 The skill ratings above belong to each position's **starter**. Every position also has a bench of
-backups with their own (lower) skill and their own stamina — see §9 for the full depth chart and
+backups with their own (lower) skill and their own stamina — see §10 for the full depth chart and
 how skill and exhaustion interact with gem frequency.
 
 ## 4. Playbook
@@ -99,16 +99,44 @@ A 7×7 grid where every gem represents one of the current play's 5 personnel.
   and does **not** cost a move.
 - **Successful swaps cost a move** and trigger resolution.
 - **Matching.** Any run of 3 or more of the same position, in a row or column, clears. A gem can
-  belong to both a row-match and a column-match at once.
+  belong to both a row-match and a column-match at once. A match of 4 or more, or one shaped like
+  an L/T, instead produces a special piece — see §5a.
 - **Filling meters.** Every cleared gem adds points to its position's meter (capped at 100),
-  multiplied by the current combo.
+  multiplied by the current combo. A cell that converts into a special piece does not clear or
+  fill a meter on creation — it fills (and dumps into others) when later activated.
 - **Gravity & cascades.** Gems above a cleared cell fall to fill the gap; new gems spawn at the
   top using the same weighting as the original deal. If the fall creates new matches, they
-  resolve automatically and the combo multiplier increases, up to a cap, before settling.
+  resolve automatically and the combo multiplier increases, up to a cap, before settling. Special
+  pieces only enter the board this way — they are never part of the weighted-random deal.
 - **Move budget.** Each play allows 6 moves. Once they're spent, the play resolves automatically
   after a short beat; the player may also snap early at any time.
-- **Input lock.** While gems are swapping, clearing, or falling, taps are ignored so animations
-  can't be interrupted or double-triggered.
+- **Input lock.** While gems are swapping, clearing, falling, or a special piece is activating and
+  its cascade is resolving, taps are ignored so animations can't be interrupted or double-triggered.
+
+## 5a. Special pieces
+
+Every special piece's effect routes through the same meter economy as an ordinary clear — they are
+targeted meter manipulation, not a separate objective. Made by larger or differently-shaped
+matches, they occupy a board cell like any gem and activate when swapped with any neighbor
+(whether or not that swap also happens to form a new match):
+
+- **4-in-a-row/column → Line clearer.** Swapping it clears its entire row (if made horizontally)
+  or column (if made vertically). Every cleared cell fills its own position's meter as normal —
+  a big, multi-position dump along a line.
+- **5-in-an-L-or-T-shape → Bomb.** Swapping it clears the 3×3 area centered on it. Same per-cell
+  meter fill as the line clearer, just localized instead of linear.
+- **6-or-more in a row/column → Color bomb.** This is a *targeting* tool, not a passive bonus:
+  swapping it with a gem of color X clears every gem of color X on the board, dumping a large
+  amount into that one position's meter. It's a deliberate way to force a specific position into
+  the lead at the snap — "I'm putting this play in the WR's hands" — rather than letting the meter
+  race play out organically. **The O-line can't be targeted into carrying the ball this way** — it
+  never becomes the ball-carrier regardless of how full its meter gets (see §6).
+- **Visuals.** Each type has a distinct, beveled, "charged" look (thicker glowing border, a slow
+  ambient pulse) so they read clearly against ordinary gems at the same deliberate animation pace
+  as the rest of the board — no faster tier for specials.
+- **Out of scope (for now).** Combining two special pieces by swapping them together — only one of
+  the two activates; the other is just displaced, unconsumed. No line+line, line+bomb, or
+  color-bomb-plus-anything combos yet.
 
 ## 6. The odds — how a play resolves
 
@@ -120,19 +148,20 @@ on the board is:
 > `weight = prominence × (0.7 + skill ÷ 10) × staminaFactor`
 
 where *skill* is whichever player is currently active at that position (starter or a swapped-in
-backup) and *staminaFactor* reflects how exhausted that same player currently is — see §9 for both
+backup) and *staminaFactor* reflects how exhausted that same player currently is — see §10 for both
 systems. At full stamina, *staminaFactor* is 1 and the formula behaves exactly as it always has.
 
 A gem color is then drawn by weighted random choice across the active personnel. There's no
 upfront boost for any one position — the board's mix is set entirely by the play you called, and
 every position is equally available to chase from the first move.
 
-**Who gets the ball.** At the moment of the snap, whichever position has the fullest meter
-carries the play — there is no pre-snap pick. If two or more positions are tied, the more
-prominent one (per the play's weighting) wins the tie; if that's also tied, the play's personnel
-order breaks it. In practice this means you're reading the board as you match, not committing to
-a plan before you see a single gem: a play called for its run-blocking can still end up in an
-unexpected pair of hands if that's where the matches fell.
+**Who gets the ball.** At the moment of the snap, whichever *skill* position has the fullest meter
+carries the play — there is no pre-snap pick. The O-line is excluded from this race; it blocks, it
+never carries, no matter how full its meter gets. If two or more eligible positions are tied, the
+more prominent one (per the play's weighting) wins the tie; if that's also tied, the play's
+personnel order breaks it. In practice this means you're reading the board as you match, not
+committing to a plan before you see a single gem: a play called for its run-blocking can still end
+up in an unexpected pair of hands if that's where the matches fell.
 
 **Outcome resolution (on snap).** Let *F* be the ball-carrier's meter (0–100) — the position that
 won the snap above — and *OL* be the O-line's meter. The outcome is rolled in three tiers,
@@ -159,7 +188,31 @@ play to them. Whoever ends up with the fullest meter at the snap gets the same p
 its floor on negative plays, roughly 1-in-5 odds of an explosive at a maxed meter, and an ordinary
 gain at the top of the play's base range.
 
-## 7. Drive, downs, and scoring
+## 7. Momentum (drive-level meter)
+
+A second meter exists above the per-position meters: **momentum**, a single 0–100 gauge that
+belongs to the drive, not to any one position or play.
+
+- **Charges on excellence, not volume.** Momentum does not move when you simply clear gems. It
+  charges only on two events: **+25 when a play resolves as an explosive gain**, and **+15 when a
+  play earns a first down**. Both can land on the same play (an explosive that also converts).
+  Momentum caps at 100 and does not charge on a touchdown — the drive is about to reset anyway.
+- **Persists across plays** within the same drive, exactly like field position and the down/distance
+  count. **Resets to 0** whenever possession flips (touchdown or turnover on downs) — the same
+  lifecycle boundary the drive itself uses.
+- **Player-spent.** When momentum reaches 100, a **CASH IN MOMENTUM** button appears on the
+  play-call screen. Cashing it spends the full meter and arms the *next* play: that play's outcome
+  roll skips the negative- and ordinary-gain tiers entirely and resolves as an explosive gain,
+  regardless of how full the ball-carrier's meter ends up being. It is never spent automatically —
+  you choose the play to spend it on.
+- **HUD.** A distinct fire-accented panel (separate from the per-position meter row) appears below
+  the field bar on both the play-call and board screens, showing the current percentage, the
+  CASH IN button once full, and a "EXPLOSIVE LOCKED IN" badge once armed and waiting on the next
+  snap.
+- **Save/resume.** Momentum and its armed state are ordinary fields on the saved game state, so
+  they persist through the same autosave as score and field position.
+
+## 8. Drive, downs, and scoring
 
 Field position runs on a 0–100 scale; a drive starts on your own 25. After yards from a play are
 applied:
@@ -173,7 +226,7 @@ applied:
 - Yardage reveals by ticking up or down one yard at a time, with the field's ball marker and
   first-down line easing into their new positions.
 
-## 8. The defense
+## 9. The defense
 
 When your drive ends (by touchdown or turnover on downs), the opponent plays a possession of its
 own, shown as an automated, play-by-play log rather than a puzzle — there's no board to fill in on
@@ -193,7 +246,7 @@ defense.
 - A short pause separates each simulated play and each drive-ending event, so the log reads like a
   real series of snaps rather than an instant result.
 
-## 9. Exhaustion & roster management
+## 10. Exhaustion & roster management
 
 Every position fields more than one player. Touches wear the active player down; only benching
 them lets them recover, so a drive becomes a real allocation problem — keep riding your hot
@@ -230,10 +283,10 @@ player swaps them in immediately; swaps are free and unlimited, but only availab
 on the Play Call screen — once you're on the board for a play, the lineup is locked in. The
 play-call personnel chips also carry a compact stamina sliver and the active player's name, so you
 can see who's about to take the field, and how tired they are, without opening the modal. The
-defense has no roster or stamina of its own — its randomized execution/protection rolls (§8) stand
+defense has no roster or stamina of its own — its randomized execution/protection rolls (§9) stand
 in for everything a real depth chart would otherwise represent.
 
-## 10. Save & resume
+## 11. Save & resume
 
 The game state is saved automatically any time you're not on the title screen, so leaving and
 returning puts you back exactly where you left off — same drive, same score, same board if you
@@ -243,7 +296,7 @@ or in the middle of an opponent's possession, the game instead resumes you at th
 decision point — the play-call screen, with the ball where it was — rather than restoring a
 half-finished animation.
 
-## 11. Tuning constants
+## 12. Tuning constants
 
 | Constant | Value | Effect |
 |---|---|---|
@@ -258,6 +311,9 @@ half-finished animation.
 | Opponent execution roll | random per play | Stands in for a meter the AI doesn't build. |
 | Opponent protection roll | random per play | Stands in for the AI's O-line meter. |
 | Opponent punt distance | ~35–45 yards | Only thrown on long 4th downs in their own half. |
+| Momentum charge — explosive play | +25 | Caps at 100; doesn't charge from ordinary clears. |
+| Momentum charge — first down | +15 | Stacks with the explosive charge on the same play. |
+| Momentum spend effect | forced explosive | Cashing in skips straight to the explosive tier on the next play. |
 | RB/WR bench depth | 3 (starter + 2 backups) | Deepest depth charts in the game. |
 | QB/OL/SL/TE/FB bench depth | 2 (starter + 1 backup) | Shallower depth charts. |
 | Backup skill falloff | −1 per depth slot (floor 1) | Backups are always less skilled than the starter. |
@@ -265,7 +321,7 @@ half-finished animation.
 | Stamina recovery per offensive play | +25 to all benched slots | Opponent drives don't trigger this. |
 | Stamina-to-frequency term | 0.4 + 0.6 × (stamina ÷ 100) | Floors gem frequency at 40% of normal, never zero. |
 
-## 12. Visual design
+## 13. Visual design
 
 A backlit handheld-console presentation: the whole game lives inside a single rounded device
 frame ("cartridge") centered on a dark gradient backdrop, bordered in near-black with a glowing
@@ -317,7 +373,7 @@ screen for a powered-on LCD feel.
   the same stamina bar plus the active player's name, so their condition is visible without opening
   the modal.
 
-## 13. Out of scope / not yet built
+## 14. Out of scope / not yet built
 
 - Player-side 4th-down decisions (punting or attempting a field goal) — on offense, failing to
   convert by 4th down is always a turnover on downs.
