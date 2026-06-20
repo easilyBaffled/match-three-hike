@@ -162,25 +162,97 @@ function buildGrid() {
   return g;
 }
 
-function findMatches(grid) {
-  const R = grid.length, C = grid[0].length, hit = {};
+// Collects every straight run of 3+ same-color, non-blank gems, by
+// orientation, as its own entry (no merging) — shape/size is what later
+// decides whether a run becomes an ordinary clear or a special piece.
+function findRuns(grid) {
+  const R = grid.length, C = grid[0].length, runs = [];
   for (let r = 0; r < R; r++) {
-    let run = 1;
+    let cells = [[r, 0]];
     for (let c = 1; c <= C; c++) {
       const a = c < C ? grid[r][c] : null, b = grid[r][c - 1];
-      if (a && b && a.color === b.color && !a.blank && !b.blank) run++;
-      else { if (run >= 3) for (let k = 1; k <= run; k++) hit[r + ',' + (c - k)] = 1; run = 1; }
+      if (a && b && a.color === b.color && !a.blank && !b.blank) cells.push([r, c]);
+      else { if (cells.length >= 3) runs.push({ orientation: 'row', color: b.color, cells }); cells = [[r, c]]; }
     }
   }
   for (let c = 0; c < C; c++) {
-    let run = 1;
+    let cells = [[0, c]];
     for (let r = 1; r <= R; r++) {
       const a = r < R ? grid[r][c] : null, b = grid[r - 1][c];
-      if (a && b && a.color === b.color && !a.blank && !b.blank) run++;
-      else { if (run >= 3) for (let k = 1; k <= run; k++) hit[(r - k) + ',' + c] = 1; run = 1; }
+      if (a && b && a.color === b.color && !a.blank && !b.blank) cells.push([r, c]);
+      else { if (cells.length >= 3) runs.push({ orientation: 'col', color: b.color, cells }); cells = [[r, c]]; }
     }
   }
-  return Object.keys(hit).map((s) => s.split(',').map(Number));
+  return runs;
+}
+
+function cellKey(r, c) { return r + ',' + c; }
+
+// Picks which cell of a run becomes a special piece's anchor: the swap
+// destination if it's part of the run (reads as "this is the piece I made"),
+// otherwise the run's middle cell.
+function pickAnchor(cells, anchorHint) {
+  if (anchorHint) {
+    const hit = cells.find(([r, c]) => r === anchorHint.r && c === anchorHint.c);
+    if (hit) return hit;
+  }
+  return cells[Math.floor(cells.length / 2)];
+}
+
+// Classifies the runs found this pass into the cells that simply clear and
+// the cells that become special pieces instead (ladder: 4-straight → line
+// clearer, two 3-runs crossing → bomb, 6+-straight → color bomb). Returns
+// null if nothing matched.
+function findMatches(grid, anchorHint) {
+  const runs = findRuns(grid);
+  if (!runs.length) return null;
+
+  const matched = new Set();
+  runs.forEach((run) => run.cells.forEach(([r, c]) => matched.add(cellKey(r, c))));
+
+  const specials = new Map();
+  const usedAnchors = new Set();
+  const rowRuns = runs.filter((r) => r.orientation === 'row');
+  const colRuns = runs.filter((r) => r.orientation === 'col');
+  const pairedRuns = new Set();
+
+  // L/T-of-5: a 3-run crossing a perpendicular 3-run of the same color.
+  rowRuns.forEach((rr) => {
+    if (rr.cells.length !== 3) return;
+    colRuns.forEach((cr) => {
+      if (cr.cells.length !== 3 || cr.color !== rr.color) return;
+      const shared = rr.cells.find(([r, c]) => cr.cells.some(([r2, c2]) => r2 === r && c2 === c));
+      if (!shared) return;
+      const key = cellKey(shared[0], shared[1]);
+      if (usedAnchors.has(key)) return;
+      specials.set(key, { type: 'bomb', color: rr.color });
+      usedAnchors.add(key);
+      pairedRuns.add(rr); pairedRuns.add(cr);
+    });
+  });
+
+  // 6+ straight run, any orientation → color bomb (checked before line
+  // clearer so a long run doesn't get downgraded).
+  runs.forEach((run) => {
+    if (run.cells.length < 6) return;
+    const [r, c] = pickAnchor(run.cells, anchorHint);
+    const key = cellKey(r, c);
+    if (usedAnchors.has(key)) return;
+    specials.set(key, { type: 'colorbomb', color: run.color });
+    usedAnchors.add(key);
+  });
+
+  // 4-or-5 straight run not already consumed by an L/T pairing → line clearer.
+  runs.forEach((run) => {
+    if (run.cells.length < 4 || run.cells.length >= 6 || pairedRuns.has(run)) return;
+    const [r, c] = pickAnchor(run.cells, anchorHint);
+    const key = cellKey(r, c);
+    if (usedAnchors.has(key)) return;
+    specials.set(key, { type: run.orientation === 'row' ? 'lineH' : 'lineV', color: run.color });
+    usedAnchors.add(key);
+  });
+
+  return { matched, specials };
 }
 
 function gravity(grid) {
@@ -280,9 +352,21 @@ function onCellSwipe(r, c, dx, dy) {
 async function trySwap(a, b) {
   const grid = state.grid, g = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
   const t = g[a.r][a.c]; g[a.r][a.c] = g[b.r][b.c]; g[b.r][b.c] = t;
+  // post-swap: the gem that was at `a` now sits at `b`, and vice versa.
+  const atB = g[b.r][b.c], atA = g[a.r][a.c];
+  // Swapping a special piece always activates it — combining two specials
+  // in one swap is out of scope, so the moved-from piece (atB) wins ties.
+  const activated = atB.special ? { gem: atB, pos: b, targetColor: atA.color }
+    : atA.special ? { gem: atA, pos: a, targetColor: atB.color }
+      : null;
   setState({ grid: g, selected: null, busy: true });
   await sleep(450);
-  if (!findMatches(g).length) {
+  if (activated) {
+    setState({ movesLeft: state.movesLeft - 1 });
+    await activateSpecial(g, activated.gem, activated.pos, activated.targetColor);
+    return;
+  }
+  if (!findMatches(g, b)) {
     const g2 = g.map((row) => row.map((x) => (x ? { ...x } : null)));
     const t2 = g2[a.r][a.c]; g2[a.r][a.c] = g2[b.r][b.c]; g2[b.r][b.c] = t2;
     setState({ grid: g2 });
@@ -291,24 +375,66 @@ async function trySwap(a, b) {
     return;
   }
   setState({ movesLeft: state.movesLeft - 1 });
-  await resolveCascade(g, state.meters, 1);
+  await resolveCascade(g, state.meters, 1, b);
 }
 
-async function resolveCascade(grid, meters, combo) {
-  const m = findMatches(grid);
-  if (!m.length) { setState({ grid, meters, busy: false }); afterMove(); return; }
+// A special piece activating is a swap-triggered effect, not a match — it
+// dumps its targeted cells through the same fill-and-clear path so meters
+// still see it as a clear, then hands off to resolveCascade so any matches
+// the gravity settle produces (including new specials) keep chaining.
+async function activateSpecial(grid, gem, pos, targetColor) {
+  const R = grid.length, C = grid[0].length, cells = new Set([cellKey(pos.r, pos.c)]);
+  if (gem.special === 'lineH') { for (let c = 0; c < C; c++) cells.add(cellKey(pos.r, c)); }
+  else if (gem.special === 'lineV') { for (let r = 0; r < R; r++) cells.add(cellKey(r, pos.c)); }
+  else if (gem.special === 'bomb') {
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
+      const r = pos.r + dr, c = pos.c + dc;
+      if (r >= 0 && r < R && c >= 0 && c < C) cells.add(cellKey(r, c));
+    }
+  } else if (gem.special === 'colorbomb') {
+    for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
+      if (grid[r][c] && grid[r][c].color === targetColor) cells.add(cellKey(r, c));
+    }
+  }
+  const g2 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
+  const nm = { ...state.meters };
+  cells.forEach((key) => {
+    const [r, c] = key.split(',').map(Number);
+    const x = g2[r][c];
+    if (x) { x.clearing = true; nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL); }
+  });
+  setState({ grid: g2, meters: nm });
+  await sleep(440);
+  const g3 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
+  cells.forEach((key) => { const [r, c] = key.split(',').map(Number); g3[r][c] = null; });
+  const g4 = gravity(g3);
+  setState({ grid: g4 });
+  await sleep(450);
+  await resolveCascade(g4, nm, 1);
+}
+
+async function resolveCascade(grid, meters, combo, anchorHint) {
+  const m = findMatches(grid, anchorHint);
+  if (!m) { setState({ grid, meters, busy: false }); afterMove(); return; }
   const R = grid.length, C = grid[0].length;
   const g2 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
   const nm = { ...meters };
-  const matchSet = new Set(m.map(([r, c]) => r + ',' + c));
   const blanksToClear = [];
-  m.forEach(([r, c]) => {
+  m.matched.forEach((key) => {
+    const [r, c] = key.split(',').map(Number);
+    const becoming = m.specials.get(key);
     const x = g2[r][c];
+    if (becoming) {
+      // Converts into a special piece instead of clearing — it still
+      // represents its position's color, just doesn't fill that meter yet.
+      if (x) { x.special = becoming.type; x.color = becoming.color; }
+      return;
+    }
     if (x) { x.clearing = true; nm[x.color] = Math.min(100, (nm[x.color] || 0) + FILL * combo); }
     [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]].forEach(([nr, nc]) => {
       if (nr < 0 || nc < 0 || nr >= R || nc >= C) return;
-      const key = nr + ',' + nc;
-      if (matchSet.has(key)) return;
+      const nkey = nr + ',' + nc;
+      if (m.matched.has(nkey)) return;
       const ng = g2[nr][nc];
       if (ng && ng.blank && !ng.clearing) { ng.clearing = true; blanksToClear.push([nr, nc]); }
     });
@@ -316,7 +442,12 @@ async function resolveCascade(grid, meters, combo) {
   setState({ grid: g2, meters: nm });
   await sleep(440);
   const g3 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
-  m.forEach(([r, c]) => { g3[r][c] = null; });
+  m.matched.forEach((key) => {
+    const [r, c] = key.split(',').map(Number);
+    const becoming = m.specials.get(key);
+    if (becoming) { g3[r][c] = { ...g3[r][c], special: becoming.type, color: becoming.color }; return; }
+    g3[r][c] = null;
+  });
   blanksToClear.forEach(([r, c]) => { g3[r][c] = null; });
   const g4 = gravity(g3);
   setState({ grid: g4 });
@@ -634,11 +765,21 @@ function gemOuterStyleObj(r, c, sel, blank) {
   return { position: 'absolute', width: 'var(--cell)', height: 'var(--cell)', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r}))`, transition: 'transform .44s cubic-bezier(.2,.8,.3,1)', padding: '4px', zIndex: sel ? 6 : 1, cursor: blank ? 'not-allowed' : 'pointer', touchAction: 'none' };
 }
 
-function gemInnerStyleObj(color, sel, anim, blank) {
-  const bg = blank
-    ? `repeating-linear-gradient(45deg, ${color}55 0 6px, #10182f 6px 12px)`
-    : color;
-  return { width: '100%', height: '100%', background: bg, border: '3px solid rgba(0,0,0,.5)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: 'clamp(8px, calc(var(--cell) * .22), 11px)', textShadow: '1px 1px 0 rgba(0,0,0,.55)', opacity: blank ? .75 : 1, boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: anim };
+const SPECIAL_ICON = { lineH: '↔', lineV: '↕', bomb: '\u{1F4A3}', colorbomb: '★' };
+
+// Specials get a distinctly chunkier, "charged" look (thicker glowing
+// border, a slow ambient pulse) at the same pace as the rest of the board's
+// motion — no faster animation tier, just a different idle state.
+function gemInnerStyleObj(color, sel, anim, blank, special) {
+  let bg = color;
+  if (blank) bg = `repeating-linear-gradient(45deg, ${color}55 0 6px, #10182f 6px 12px)`;
+  else if (special === 'colorbomb') bg = 'conic-gradient(from 0deg, #ff4d4d, #ffd23f, #2fd45e, #21c7ff, #7b5cff, #ff4d4d)';
+  else if (special === 'bomb') bg = `radial-gradient(circle at 50% 40%, ${color}, #10182f 130%)`;
+  else if (special === 'lineH') bg = `linear-gradient(90deg, ${color} 0 30%, #fff8 30% 36%, ${color} 36% 64%, #fff8 64% 70%, ${color} 70%)`;
+  else if (special === 'lineV') bg = `linear-gradient(180deg, ${color} 0 30%, #fff8 30% 36%, ${color} 36% 64%, #fff8 64% 70%, ${color} 70%)`;
+  const border = special ? '4px solid #ffd23f' : '3px solid rgba(0,0,0,.5)';
+  const specialAnim = special && anim === 'none' ? 'specialPulse 1.8s ease-in-out infinite' : anim;
+  return { width: '100%', height: '100%', background: bg, border, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: special ? 'clamp(11px, calc(var(--cell) * .34), 17px)' : 'clamp(8px, calc(var(--cell) * .22), 11px)', textShadow: '1px 1px 0 rgba(0,0,0,.55)', opacity: blank ? .75 : 1, boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: specialAnim };
 }
 
 function renderBoard() {
@@ -655,8 +796,9 @@ function renderBoard() {
       const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
       const outerStyle = styleStr(gemOuterStyleObj(r, c, sel, g.blank));
       const anim = g.clearing ? 'popOut .44s forwards' : 'none';
-      const innerStyle = styleStr(gemInnerStyleObj(p.color, sel, anim, g.blank));
-      gems.push(`<div data-action="cellTap" data-gem-id="${g.id}" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${g.blank ? '🔒' : p.name}</div></div>`);
+      const innerStyle = styleStr(gemInnerStyleObj(p.color, sel, anim, g.blank, g.special));
+      const label = g.blank ? '🔒' : g.special ? SPECIAL_ICON[g.special] : p.name;
+      gems.push(`<div data-action="cellTap" data-gem-id="${g.id}" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${label}</div></div>`);
     }
   }
   const boardStyle = styleStr({ position: 'relative', width: 'calc(var(--cell) * ' + COLS + ')', height: 'calc(var(--cell) * ' + ROWS + ')' });
@@ -832,7 +974,7 @@ function syncGems(grid) {
       seen.add(g.id);
       const p = POS[g.color], sel = S.selected && S.selected.r === r && S.selected.c === c;
       const anim = g.clearing ? 'popOut .44s forwards' : 'none';
-      const label = g.blank ? '🔒' : p.name;
+      const label = g.blank ? '🔒' : g.special ? SPECIAL_ICON[g.special] : p.name;
       let entry = gemEls.get(g.id);
       if (!entry) {
         const outer = document.createElement('div');
@@ -847,7 +989,7 @@ function syncGems(grid) {
           // Place new gems above the board, fully formed, before the transform
           // transition below animates them falling in — avoids a visible fade-in.
           entry.outer.setAttribute('style', styleStr({ ...gemOuterStyleObj(r, c, sel, g.blank), transition: 'none', transform: `translate(calc(var(--cell) * ${c}), calc(var(--cell) * ${r - 1}))` }));
-          entry.inner.setAttribute('style', styleStr(gemInnerStyleObj(p.color, sel, 'none', g.blank)));
+          entry.inner.setAttribute('style', styleStr(gemInnerStyleObj(p.color, sel, 'none', g.blank, g.special)));
           entry.inner.textContent = label;
           void entry.outer.offsetHeight;
         }
@@ -855,7 +997,7 @@ function syncGems(grid) {
       entry.outer.dataset.r = r;
       entry.outer.dataset.c = c;
       entry.outer.setAttribute('style', styleStr(gemOuterStyleObj(r, c, sel, g.blank)));
-      entry.inner.setAttribute('style', styleStr(gemInnerStyleObj(p.color, sel, anim, g.blank)));
+      entry.inner.setAttribute('style', styleStr(gemInnerStyleObj(p.color, sel, anim, g.blank, g.special)));
       entry.inner.textContent = label;
     }
   }

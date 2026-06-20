@@ -95,16 +95,44 @@ A 7×7 grid where every gem represents one of the current play's 5 personnel.
   and does **not** cost a move.
 - **Successful swaps cost a move** and trigger resolution.
 - **Matching.** Any run of 3 or more of the same position, in a row or column, clears. A gem can
-  belong to both a row-match and a column-match at once.
+  belong to both a row-match and a column-match at once. A match of 4 or more, or one shaped like
+  an L/T, instead produces a special piece — see §5a.
 - **Filling meters.** Every cleared gem adds points to its position's meter (capped at 100),
-  multiplied by the current combo.
+  multiplied by the current combo. A cell that converts into a special piece does not clear or
+  fill a meter on creation — it fills (and dumps into others) when later activated.
 - **Gravity & cascades.** Gems above a cleared cell fall to fill the gap; new gems spawn at the
   top using the same weighting as the original deal. If the fall creates new matches, they
-  resolve automatically and the combo multiplier increases, up to a cap, before settling.
+  resolve automatically and the combo multiplier increases, up to a cap, before settling. Special
+  pieces only enter the board this way — they are never part of the weighted-random deal.
 - **Move budget.** Each play allows 6 moves. Once they're spent, the play resolves automatically
   after a short beat; the player may also snap early at any time.
-- **Input lock.** While gems are swapping, clearing, or falling, taps are ignored so animations
-  can't be interrupted or double-triggered.
+- **Input lock.** While gems are swapping, clearing, falling, or a special piece is activating and
+  its cascade is resolving, taps are ignored so animations can't be interrupted or double-triggered.
+
+## 5a. Special pieces
+
+Every special piece's effect routes through the same meter economy as an ordinary clear — they are
+targeted meter manipulation, not a separate objective. Made by larger or differently-shaped
+matches, they occupy a board cell like any gem and activate when swapped with any neighbor
+(whether or not that swap also happens to form a new match):
+
+- **4-in-a-row/column → Line clearer.** Swapping it clears its entire row (if made horizontally)
+  or column (if made vertically). Every cleared cell fills its own position's meter as normal —
+  a big, multi-position dump along a line.
+- **5-in-an-L-or-T-shape → Bomb.** Swapping it clears the 3×3 area centered on it. Same per-cell
+  meter fill as the line clearer, just localized instead of linear.
+- **6-or-more in a row/column → Color bomb.** This is a *targeting* tool, not a passive bonus:
+  swapping it with a gem of color X clears every gem of color X on the board, dumping a large
+  amount into that one position's meter. It's a deliberate way to force a specific position into
+  the lead at the snap — "I'm putting this play in the WR's hands" — rather than letting the meter
+  race play out organically. **The O-line can't be targeted into carrying the ball this way** — it
+  never becomes the ball-carrier regardless of how full its meter gets (see §6).
+- **Visuals.** Each type has a distinct, beveled, "charged" look (thicker glowing border, a slow
+  ambient pulse) so they read clearly against ordinary gems at the same deliberate animation pace
+  as the rest of the board — no faster tier for specials.
+- **Out of scope (for now).** Combining two special pieces by swapping them together — only one of
+  the two activates; the other is just displaced, unconsumed. No line+line, line+bomb, or
+  color-bomb-plus-anything combos yet.
 
 ## 6. The odds — how a play resolves
 
