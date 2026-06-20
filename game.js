@@ -921,6 +921,19 @@ function gemInnerStyleObj(color, sel, anim, blank, special) {
   return { width: '100%', height: '100%', background: bg, border, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: special ? 'clamp(11px, calc(var(--cell) * .34), 17px)' : 'clamp(8px, calc(var(--cell) * .22), 11px)', textShadow: '1px 1px 0 rgba(0,0,0,.55)', opacity: blank ? .75 : 1, boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: specialAnim };
 }
 
+// The leading position's meter is the only thing marking who's currently
+// favored to carry the ball — no separate "ball control" readout, just this
+// bar glowing in its own color while the others stay flat.
+function rosterOuterStyleObj(color, sel) {
+  return {
+    position: 'relative', width: '100%', height: '34px', borderRadius: '4px', overflow: 'hidden',
+    background: '#10182f', display: 'flex', alignItems: 'flex-end',
+    border: '2px solid ' + (sel ? color : '#04060e'),
+    '--glow-color': color,
+    animation: sel ? 'leaderGlow 1.4s ease-in-out infinite' : 'none',
+  };
+}
+
 function renderBoard() {
   const S = state, cp = currentPlay();
   const spot = S.ballOn > 50 ? ('OPP ' + (100 - S.ballOn)) : ('OWN ' + S.ballOn);
@@ -943,27 +956,12 @@ function renderBoard() {
   const boardStyle = styleStr({ position: 'relative', width: 'calc(var(--cell) * ' + COLS + ')', height: 'calc(var(--cell) * ' + ROWS + ')' });
 
   const fk = leadPlayer();
-  let fMeterHtml = '';
-  if (fk) {
-    const pct = Math.round(S.meters[fk] || 0);
-    fMeterHtml = `<div class="pixel" style="font-size:9px;color:#7f97cf;margin-bottom:5px;letter-spacing:1px;">BALL CONTROL</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;">
-        <div style="display:flex;align-items:center;gap:7px;">
-          <div id="leaderSwatch" style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-family:'Press Start 2P',monospace;font-size:9px;color:#fff;background:${POS[fk].color};border:2px solid rgba(0,0,0,.45);border-radius:5px;text-shadow:1px 1px 0 rgba(0,0,0,.5);">${POS[fk].name}</div>
-          <div id="leaderName" style="font-size:20px;color:#fff;letter-spacing:1px;white-space:nowrap;">${POS[fk].full}</div>
-        </div>
-        <div id="featureMeterPct" class="pixel" style="font-size:12px;color:#ffd23f;">${pct}%</div>
-      </div>
-      <div style="position:relative;height:18px;border:3px solid #04060e;border-radius:5px;overflow:hidden;background:#10182f;">
-        <div id="featureMeterFill" style="height:100%;width:${pct}%;background:${POS[fk].color};transition:width .18s;box-shadow:0 0 8px ${POS[fk].color};"></div>
-        <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.25),transparent 50%);pointer-events:none;"></div>
-      </div>`;
-  }
 
   const roster = (cp ? cp.personnel : []).map((k) => {
     const sel = fk === k, h = Math.round(S.meters[k] || 0);
+    const outerStyle = styleStr(rosterOuterStyleObj(POS[k].color, sel));
     return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
-      <div style="position:relative;width:100%;height:34px;border:2px solid #04060e;border-radius:4px;overflow:hidden;background:#10182f;display:flex;align-items:flex-end;">
+      <div id="rosterOuter-${k}" style="${outerStyle}">
         <div id="rosterBar-${k}" style="width:100%;height:${h}%;background:${POS[k].color};transition:height .18s;"></div>
       </div>
       <div id="rosterLabel-${k}" class="pixel" style="font-size:8px;color:${sel ? '#ffd23f' : '#6f86c4'};">${k}</div>
@@ -993,8 +991,7 @@ function renderBoard() {
       </div>
     </div>
     <div style="padding:10px 14px 14px;background:#0b1228;border-top:3px solid #04060e;flex:0 0 auto;">
-      ${fMeterHtml}
-      <div style="display:flex;gap:7px;margin-top:10px;align-items:flex-end;">${roster}</div>
+      <div style="display:flex;gap:7px;align-items:flex-end;">${roster}</div>
       <div data-action="snap" style="margin-top:12px;text-align:center;font-family:'Press Start 2P',monospace;font-size:15px;color:#13210f;background:#ffd23f;border:3px solid #04060e;border-radius:8px;padding:13px;box-shadow:0 5px 0 #b58a0c,0 8px 12px rgba(0,0,0,.4);cursor:pointer;letter-spacing:1px;">🏈 HIKE!</div>
     </div>
   </div>`;
@@ -1081,23 +1078,15 @@ function updateBoardScreen() {
     movesEl.style.color = S.movesLeft <= 2 ? '#ff4d4d' : '#ffd23f';
   }
   const fk = leadPlayer();
-  if (fk) {
-    const pct = Math.round(S.meters[fk] || 0);
-    const fill = document.getElementById('featureMeterFill');
-    const pctEl = document.getElementById('featureMeterPct');
-    const swatch = document.getElementById('leaderSwatch');
-    const nameEl = document.getElementById('leaderName');
-    if (fill) { fill.style.width = pct + '%'; fill.style.background = POS[fk].color; fill.style.boxShadow = '0 0 8px ' + POS[fk].color; }
-    if (pctEl) pctEl.textContent = pct + '%';
-    if (swatch) { swatch.style.background = POS[fk].color; swatch.textContent = POS[fk].name; }
-    if (nameEl) nameEl.textContent = POS[fk].full;
-  }
   const cp = currentPlay();
   (cp ? cp.personnel : []).forEach((k) => {
+    const sel = fk === k;
     const bar = document.getElementById('rosterBar-' + k);
     if (bar) bar.style.height = Math.round(S.meters[k] || 0) + '%';
     const label = document.getElementById('rosterLabel-' + k);
-    if (label) label.style.color = (fk === k) ? '#ffd23f' : '#6f86c4';
+    if (label) label.style.color = sel ? '#ffd23f' : '#6f86c4';
+    const outer = document.getElementById('rosterOuter-' + k);
+    if (outer) outer.setAttribute('style', styleStr(rosterOuterStyleObj(POS[k].color, sel)));
   });
   syncGems(S.grid);
 }
