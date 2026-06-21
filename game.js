@@ -927,14 +927,15 @@ function gemInnerStyleObj(color, sel, anim, blank, special) {
   return { width: '100%', height: '100%', background: bg, border, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontFamily: "'Press Start 2P',monospace", fontSize: special ? 'clamp(11px, calc(var(--cell) * .34), 17px)' : 'clamp(8px, calc(var(--cell) * .22), 11px)', textShadow: '1px 1px 0 rgba(0,0,0,.55)', opacity: blank ? .75 : 1, boxShadow: (sel ? '0 0 0 3px #fff,' : '') + 'inset 3px 3px 0 rgba(255,255,255,.45),inset -4px -4px 0 rgba(0,0,0,.32)', transform: sel ? 'scale(1.05)' : 'scale(1)', transition: 'transform .1s', animation: specialAnim };
 }
 
-// The leading position's meter is the only thing marking who's currently
-// favored to carry the ball — no separate "ball control" readout, just this
-// bar glowing in its own color while the others stay flat.
+// Every meter's border stays tinted in its position's color (matching that
+// position's gems on the board) so the gem-to-meter link reads at a glance;
+// the leading position's meter additionally thickens and glows to mark who's
+// currently favored to carry the ball.
 function rosterOuterStyleObj(color, sel) {
   return {
     position: 'relative', width: '100%', height: '34px', borderRadius: '4px', overflow: 'hidden',
     background: '#10182f', display: 'flex', alignItems: 'flex-end',
-    border: '2px solid ' + (sel ? color : '#04060e'),
+    border: (sel ? '3px solid ' : '2px solid ') + color,
     '--glow-color': color,
     animation: sel ? 'leaderGlow 1.4s ease-in-out infinite' : 'none',
   };
@@ -955,7 +956,7 @@ function renderBoard() {
       const outerStyle = styleStr(gemOuterStyleObj(r, c, sel, g.blank));
       const anim = g.clearing ? 'popOut .44s forwards' : 'none';
       const innerStyle = styleStr(gemInnerStyleObj(p.color, sel, anim, g.blank, g.special));
-      const label = g.blank ? '🔒' : g.special ? SPECIAL_ICON[g.special] : p.name;
+      const label = g.blank ? '🔒' : g.special ? SPECIAL_ICON[g.special] : g.color === NEUTRAL ? p.name : '';
       gems.push(`<div data-action="cellTap" data-gem-id="${g.id}" data-r="${r}" data-c="${c}" style="${outerStyle}"><div style="${innerStyle}">${label}</div></div>`);
     }
   }
@@ -1114,7 +1115,7 @@ function syncGems(grid) {
       seen.add(g.id);
       const p = gemVisual(g.color), sel = S.selected && S.selected.r === r && S.selected.c === c;
       const anim = g.clearing ? 'popOut .44s forwards' : 'none';
-      const label = g.blank ? '🔒' : g.special ? SPECIAL_ICON[g.special] : p.name;
+      const label = g.blank ? '🔒' : g.special ? SPECIAL_ICON[g.special] : g.color === NEUTRAL ? p.name : '';
       let entry = gemEls.get(g.id);
       if (!entry) {
         const outer = document.createElement('div');
