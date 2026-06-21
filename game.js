@@ -819,6 +819,8 @@ function renderPlaycall() {
   </div>`;
 }
 
+const MODAL_CLOSE_BTN_STYLE = styleStr({ position: 'absolute', top: '10px', right: '10px', width: '30px', height: '30px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Press Start 2P',monospace", fontSize: '14px', color: '#13210f', background: '#ffd23f', border: '3px solid #04060e', borderRadius: '8px', boxShadow: '0 3px 0 #b58a0c', cursor: 'pointer', zIndex: '5' });
+
 function renderRosterModal() {
   const sections = Object.keys(POS).map((k) => {
     const p = POS[k];
@@ -853,11 +855,13 @@ function renderRosterModal() {
   }).join('');
 
   return `<div data-screen-label="Roster" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,8,18,.86);padding:20px;z-index:20;">
-    <div style="width:100%;max-width:340px;max-height:86%;overflow-y:auto;padding:18px 16px;border-radius:14px;border:4px solid #2fd45e;background:#0b1228;box-shadow:0 0 0 4px #04060e,0 14px 40px rgba(0,0,0,.6);animation:popIn .3s ease-out;">
-      <div class="pixel" style="font-size:14px;color:#2fd45e;margin-bottom:4px;">ROSTER</div>
-      <div style="font-size:16px;color:#7f97cf;margin-bottom:10px;">Tap a player to swap them in. Benched players recover stamina; active players don't.</div>
-      ${sections}
-      <div data-action="closeRoster" style="margin-top:6px;text-align:center;font-family:'Press Start 2P',monospace;font-size:13px;color:#13210f;background:#ffd23f;border:3px solid #04060e;border-radius:8px;padding:12px;box-shadow:0 5px 0 #b58a0c;cursor:pointer;letter-spacing:1px;">CLOSE</div>
+    <div style="position:relative;display:flex;flex-direction:column;width:100%;max-width:340px;max-height:86%;border-radius:14px;border:4px solid #2fd45e;background:#0b1228;box-shadow:0 0 0 4px #04060e,0 14px 40px rgba(0,0,0,.6);animation:popIn .3s ease-out;">
+      <div data-action="closeRoster" style="${MODAL_CLOSE_BTN_STYLE}">✕</div>
+      <div style="min-height:0;overflow-y:auto;padding:18px 16px;">
+        <div class="pixel" style="font-size:14px;color:#2fd45e;margin-bottom:4px;padding-right:34px;">ROSTER</div>
+        <div style="font-size:16px;color:#7f97cf;margin-bottom:10px;">Tap a player to swap them in. Benched players recover stamina; active players don't.</div>
+        ${sections}
+      </div>
     </div>
   </div>`;
 }
@@ -890,12 +894,14 @@ function renderMatchupModal() {
   }).join('');
 
   return `<div data-screen-label="Matchup" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,8,18,.86);padding:20px;z-index:20;">
-    <div style="width:100%;max-width:340px;max-height:86%;overflow-y:auto;padding:18px 16px;border-radius:14px;border:4px solid #21c7ff;background:#0b1228;box-shadow:0 0 0 4px #04060e,0 14px 40px rgba(0,0,0,.6);animation:popIn .3s ease-out;">
-      <div class="pixel" style="font-size:14px;color:#21c7ff;margin-bottom:4px;">MATCHUP REPORT</div>
-      <div style="font-size:16px;color:#7f97cf;margin-bottom:14px;">${cp ? cp.name + ' personnel' : 'Pick a play to scout its personnel'}</div>
-      ${rows}
-      <div style="font-size:13px;color:#5870a8;margin:10px 0 4px;line-height:1.4;">Gem % is each player's static share of the board, from skill and how the chosen play features them. Blank % is how often the defender they're matched against locks one of their gems.</div>
-      <div data-action="closeMatchup" style="margin-top:10px;text-align:center;font-family:'Press Start 2P',monospace;font-size:13px;color:#13210f;background:#ffd23f;border:3px solid #04060e;border-radius:8px;padding:12px;box-shadow:0 5px 0 #b58a0c;cursor:pointer;letter-spacing:1px;">CLOSE</div>
+    <div style="position:relative;display:flex;flex-direction:column;width:100%;max-width:340px;max-height:86%;border-radius:14px;border:4px solid #21c7ff;background:#0b1228;box-shadow:0 0 0 4px #04060e,0 14px 40px rgba(0,0,0,.6);animation:popIn .3s ease-out;">
+      <div data-action="closeMatchup" style="${MODAL_CLOSE_BTN_STYLE}">✕</div>
+      <div style="min-height:0;overflow-y:auto;padding:18px 16px;">
+        <div class="pixel" style="font-size:14px;color:#21c7ff;margin-bottom:4px;padding-right:34px;">MATCHUP REPORT</div>
+        <div style="font-size:16px;color:#7f97cf;margin-bottom:14px;">${cp ? cp.name + ' personnel' : 'Pick a play to scout its personnel'}</div>
+        ${rows}
+        <div style="font-size:13px;color:#5870a8;margin:10px 0 4px;line-height:1.4;">Gem % is each player's static share of the board, from skill and how the chosen play features them. Blank % is how often the defender they're matched against locks one of their gems.</div>
+      </div>
     </div>
   </div>`;
 }
