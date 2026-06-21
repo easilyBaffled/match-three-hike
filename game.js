@@ -759,10 +759,11 @@ function renderPlaycall() {
   if (cp) {
     const chips2 = cp.personnel.map((k) => {
       const prom = cp.prom[k] || 1;
-      const tag = prom >= 2.5 ? 'PRIMARY' : prom >= 1.4 ? 'SUPPORT' : 'DECOY';
+      const isOL = k === 'OL';
+      const tag = isOL ? 'BLOCKS' : prom >= 2.5 ? 'PRIMARY' : prom >= 1.4 ? 'SUPPORT' : 'DECOY';
       const chipStyle = styleStr({ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 11px', borderRadius: '9px', border: '3px solid #27365c', background: '#121a32' });
       const swatchStyle = styleStr({ width: '40px', height: '40px', flex: '0 0 40px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: "'Press Start 2P',monospace", fontSize: '11px', color: '#fff', background: POS[k].color, border: '3px solid rgba(0,0,0,.45)', borderRadius: '7px', textShadow: '1px 1px 0 rgba(0,0,0,.5)', boxShadow: 'inset 2px 2px 0 rgba(255,255,255,.4),inset -3px -3px 0 rgba(0,0,0,.3)' });
-      const tagStyle = styleStr({ fontFamily: "'Press Start 2P',monospace", fontSize: '7px', padding: '4px 6px', borderRadius: '4px', color: '#8fb4ff', background: '#1c2848' });
+      const tagStyle = styleStr({ fontFamily: "'Press Start 2P',monospace", fontSize: '7px', padding: '4px 6px', borderRadius: '4px', color: isOL ? '#13210f' : '#8fb4ff', background: isOL ? '#ffd23f' : '#1c2848' });
       const stars = '★'.repeat(activeSkill(k)) + '☆'.repeat(5 - activeSkill(k));
       const stamina = activeStamina(k);
       const staminaColor = stamina >= 60 ? '#2fd45e' : stamina >= 25 ? '#ffd23f' : '#ff4d4d';
@@ -781,7 +782,7 @@ function renderPlaycall() {
     }).join('');
     personnelSection = `
       <div class="pixel" style="font-size:10px;color:#ffd23f;margin:18px 0 4px;">2 ▸ ON THE FIELD</div>
-      <div style="font-size:17px;color:#7f97cf;margin-bottom:10px;">Whoever you match the most fills their meter fastest — and gets the ball at the snap.</div>
+      <div style="font-size:17px;color:#7f97cf;margin-bottom:10px;">Whoever you match the most fills their meter fastest — and gets the ball at the snap. The O-line just blocks; it's never the one carrying.</div>
       <div style="display:flex;flex-direction:column;gap:8px;">${chips2}</div>`;
   }
 
