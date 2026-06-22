@@ -105,7 +105,7 @@ A 7×7 grid where every gem represents one of the current play's 5 personnel.
   multiplied by the current combo. A cell that converts into a special piece does not clear or
   fill a meter on creation — it fills (and dumps into others) when later activated.
 - **Neutral gems.** Alongside the 5 personnel colors, a 6th, uncolored gem spawns on the board
-  (14% of cells, independent of any position's weight). It selects, swaps, and matches exactly
+  (25% of cells, independent of any position's weight). It selects, swaps, and matches exactly
   like a personnel gem — including chaining into line clearers, bombs, and color bombs — and is
   never locked blank, since no defender covers a position that isn't there. The only difference:
   it belongs to no position, so clearing it never fills a meter. It's pure board clutter, diluting
@@ -309,7 +309,7 @@ half-finished animation.
 |---|---|---|
 | Board size | 7 × 7 | — |
 | Moves per play | 6 | Lower = harder to fill meters before the snap. |
-| Neutral gem chance | 14% per cell | Higher = more board clutter, harder to fill any meter. |
+| Neutral gem chance | 25% per cell | Higher = more board clutter, harder to fill any meter. |
 | Fill per cleared gem | 5 (× combo) | — |
 | Combo multiplier | 1 → 3, +0.5 per chain | Caps cascades from scaling forever. |
 | Skill-to-frequency term | 0.7 + skill ÷ 10 | How much skill rating affects gem frequency. |
