@@ -79,7 +79,7 @@ function freshState() {
   return {
     phase: 'title', score: 0, oppScore: 0, drive: 1,
     ballOn: 25, down: 1, toGo: 10, playId: null,
-    grid: [], meters: {}, movesLeft: MOVES, selected: null, busy: false,
+    grid: [], meters: {}, movesLeft: MOVES, selected: null, busy: false, noMoves: false,
     result: null, shownYards: 0,
     momentum: 0, forcedExplosive: false,
     possession: 'you',
@@ -329,6 +329,31 @@ function findMatches(grid, anchorHint) {
   return { matched, specials };
 }
 
+// True if some orthogonally adjacent pair could legally be swapped right
+// now — mirrors onCellTap/onCellSwipe's own legality rules (no blanks on
+// either side) plus trySwap's: a special always activates on swap, anything
+// else needs the swap to actually produce a match. Scanning only the right
+// and down neighbor of every cell covers each adjacent pair exactly once.
+function hasAnyMove(grid) {
+  const R = grid.length, C = grid[0].length;
+  for (let r = 0; r < R; r++) {
+    for (let c = 0; c < C; c++) {
+      const a = grid[r][c];
+      if (!a || a.blank) continue;
+      for (const [r2, c2] of [[r, c + 1], [r + 1, c]]) {
+        if (r2 >= R || c2 >= C) continue;
+        const b = grid[r2][c2];
+        if (!b || b.blank) continue;
+        if (a.special || b.special) return true;
+        const g = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
+        const t = g[r][c]; g[r][c] = g[r2][c2]; g[r2][c2] = t;
+        if (findMatches(g)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 function gravity(grid) {
   const w = weights(), keys = currentPlay().personnel, bc = blankChances(), R = grid.length, C = grid[0].length;
   const g = grid.map((r) => r.slice());
@@ -394,7 +419,7 @@ function hike() {
   _id = 1;
   const grid = buildGrid(), meters = {};
   currentPlay().personnel.forEach((k) => { meters[k] = 0; });
-  setState({ phase: 'board', grid, meters, movesLeft: MOVES, selected: null, busy: false, result: null });
+  setState({ phase: 'board', grid, meters, movesLeft: MOVES, selected: null, busy: false, result: null, noMoves: !hasAnyMove(grid) });
 }
 
 function onCellTap(r, c) {
@@ -492,7 +517,7 @@ async function activateSpecial(grid, gem, pos, targetColor) {
 
 async function resolveCascade(grid, meters, combo, anchorHint) {
   const m = findMatches(grid, anchorHint);
-  if (!m) { setState({ grid, meters, busy: false }); afterMove(); return; }
+  if (!m) { setState({ grid, meters, busy: false, noMoves: !hasAnyMove(grid) }); afterMove(); return; }
   const R = grid.length, C = grid[0].length;
   const g2 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
   const nm = { ...meters };
@@ -663,6 +688,7 @@ function resumeGame() {
   if (state.phase === 'oppdrive') {
     state.phase = 'playcall'; state.possession = 'you'; state.playId = null;
   }
+  if (state.phase === 'board' && state.grid.length) state.noMoves = !hasAnyMove(state.grid);
   state.showMatchup = false;
   render();
 }
@@ -942,6 +968,19 @@ function rosterOuterStyleObj(color, sel) {
   };
 }
 
+// Sits absolutely-positioned off the top edge of #boardCard (its positioned
+// ancestor) so it never adds flow height to the board screen's fixed-size
+// chrome — toggling it on/off can't desync the cell size fitBoard() already
+// committed to.
+const NO_MOVES_BANNER_STYLE = styleStr({
+  position: 'absolute', top: '-24px', left: '50%', transform: 'translateX(-50%)',
+  fontFamily: "'Press Start 2P',monospace", fontSize: '9px', color: '#fff',
+  background: '#ff4d4d', border: '3px solid #04060e', borderRadius: '6px',
+  padding: '6px 10px', letterSpacing: '.5px', whiteSpace: 'nowrap',
+  boxShadow: '0 4px 0 #9c1f1f', zIndex: '8', animation: 'popIn .25s ease-out',
+  pointerEvents: 'none',
+});
+
 function renderBoard() {
   const S = state, cp = currentPlay();
   const spot = S.ballOn > 50 ? ('OPP ' + (100 - S.ballOn)) : ('OWN ' + S.ballOn);
@@ -994,6 +1033,7 @@ function renderBoard() {
         <div id="movesLabel" class="pixel" style="font-size:10px;color:${movesColor};">MOVES ${S.movesLeft}</div>
       </div>
       <div id="boardCard" style="position:relative;border:4px solid #04060e;border-radius:10px;background:#16341f;box-shadow:inset 0 0 0 3px #1f4a2c,0 8px 0 rgba(0,0,0,.4);padding:5px;flex:0 0 auto;">
+        ${S.noMoves ? `<div id="noMovesBanner" class="pixel" style="${NO_MOVES_BANNER_STYLE}">⚠ NO MOVES — HIKE!</div>` : ''}
         <div style="position:absolute;inset:5px;border-radius:6px;background:repeating-linear-gradient(0deg,transparent 0 13.9%,rgba(255,255,255,.07) 13.9% calc(13.9% + 2px)),repeating-linear-gradient(90deg,transparent 0 13.9%,rgba(255,255,255,.07) 13.9% calc(13.9% + 2px));pointer-events:none;"></div>
         <div id="gemLayer" style="${boardStyle}">${gems.join('')}</div>
       </div>
@@ -1103,6 +1143,18 @@ function updateBoardScreen() {
     if (outer) outer.setAttribute('style', styleStr(rosterOuterStyleObj(POS[k].color, sel)));
   });
   syncGems(S.grid);
+  const boardCard = document.getElementById('boardCard');
+  let banner = document.getElementById('noMovesBanner');
+  if (S.noMoves && !banner && boardCard) {
+    banner = document.createElement('div');
+    banner.id = 'noMovesBanner';
+    banner.className = 'pixel';
+    banner.textContent = '⚠ NO MOVES — HIKE!';
+    banner.setAttribute('style', NO_MOVES_BANNER_STYLE);
+    boardCard.appendChild(banner);
+  } else if (!S.noMoves && banner) {
+    banner.remove();
+  }
 }
 
 function syncGems(grid) {
