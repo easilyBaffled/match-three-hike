@@ -55,7 +55,7 @@ const SAVE_KEY = 'gridironGems:save';
 // The uncolored gem: spawns alongside the play's personnel, swaps and
 // matches exactly like any other color, but belongs to no position — clearing
 // it never fills a meter. Pure board clutter that costs you moves.
-const NEUTRAL = 'N', NEUTRAL_CHANCE = 0.14;
+const NEUTRAL = 'N', NEUTRAL_CHANCE = 0.25;
 const NEUTRAL_GEM = { name: '◆', full: 'Neutral', color: '#8a93a6' };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
