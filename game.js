@@ -456,20 +456,50 @@ async function trySwap(a, b) {
 // dumps its targeted cells through the same fill-and-clear path so meters
 // still see it as a clear, then hands off to resolveCascade so any matches
 // the gravity settle produces (including new specials) keep chaining.
-async function activateSpecial(grid, gem, pos, targetColor) {
-  const R = grid.length, C = grid[0].length, cells = new Set([cellKey(pos.r, pos.c)]);
-  if (gem.special === 'lineH') { for (let c = 0; c < C; c++) cells.add(cellKey(pos.r, c)); }
-  else if (gem.special === 'lineV') { for (let r = 0; r < R; r++) cells.add(cellKey(r, pos.c)); }
-  else if (gem.special === 'bomb') {
+// If the blast reaches another special piece, that piece detonates too —
+// its own cells fold into the blast, and so on transitively — rather than
+// the second piece just disappearing like a plain gem.
+function addBlastCells(cells, grid, special, r, c, color) {
+  const R = grid.length, C = grid[0].length;
+  cells.add(cellKey(r, c));
+  if (special === 'lineH') { for (let cc = 0; cc < C; cc++) cells.add(cellKey(r, cc)); }
+  else if (special === 'lineV') { for (let rr = 0; rr < R; rr++) cells.add(cellKey(rr, c)); }
+  else if (special === 'bomb') {
     for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-      const r = pos.r + dr, c = pos.c + dc;
-      if (r >= 0 && r < R && c >= 0 && c < C) cells.add(cellKey(r, c));
+      const rr = r + dr, cc = c + dc;
+      if (rr >= 0 && rr < R && cc >= 0 && cc < C) cells.add(cellKey(rr, cc));
     }
-  } else if (gem.special === 'colorbomb') {
-    for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) {
-      if (grid[r][c] && grid[r][c].color === targetColor) cells.add(cellKey(r, c));
+  } else if (special === 'colorbomb') {
+    for (let rr = 0; rr < R; rr++) for (let cc = 0; cc < C; cc++) {
+      if (grid[rr][cc] && grid[rr][cc].color === color) cells.add(cellKey(rr, cc));
     }
   }
+}
+
+// Walks a chain of detonations starting from one special piece, expanding
+// `cells` with the blast of any other special piece it catches along the
+// way. A chained colorbomb has no swap partner to target, so it clears its
+// own stored color instead.
+function chainSpecialBlasts(grid, special, pos, targetColor) {
+  const cells = new Set();
+  const queued = new Set([cellKey(pos.r, pos.c)]);
+  const queue = [{ special, r: pos.r, c: pos.c, color: targetColor }];
+  while (queue.length) {
+    const cur = queue.shift();
+    addBlastCells(cells, grid, cur.special, cur.r, cur.c, cur.color);
+    cells.forEach((key) => {
+      if (queued.has(key)) return;
+      queued.add(key);
+      const [r, c] = key.split(',').map(Number);
+      const x = grid[r][c];
+      if (x && x.special) queue.push({ special: x.special, r, c, color: x.color });
+    });
+  }
+  return cells;
+}
+
+async function activateSpecial(grid, gem, pos, targetColor) {
+  const cells = chainSpecialBlasts(grid, gem.special, pos, targetColor);
   const g2 = grid.map((row) => row.map((x) => (x ? { ...x } : null)));
   const nm = { ...state.meters };
   cells.forEach((key) => {
