@@ -415,8 +415,7 @@ function start() { setState({ phase: 'playcall' }); }
 function pickPlay(id) { setState({ playId: id }); }
 
 function hike() {
-  if (!state.playId) return;
-  _id = 1;
+  if (!state.playId || state.phase === 'board') return;
   const grid = buildGrid(), meters = {};
   currentPlay().personnel.forEach((k) => { meters[k] = 0; });
   setState({ phase: 'board', grid, meters, movesLeft: MOVES, selected: null, busy: false, result: null, noMoves: !hasAnyMove(grid) });
@@ -702,7 +701,6 @@ async function runOppPlay() {
 // ---------- save / resume ----------
 function newGame() {
   clearSave();
-  _id = 1;
   state = freshState();
   setState({ phase: 'playcall' });
 }
