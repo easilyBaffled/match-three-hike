@@ -85,6 +85,7 @@ function freshState() {
     possession: 'you',
     oppBallOn: 0, oppDown: 1, oppToGo: 10, oppLog: [],
     showMatchup: false, showRoster: false,
+    showHelp: false, helpPage: 0,
     roster: freshRoster(),
   };
 }
@@ -109,6 +110,14 @@ function saveGame() {
 
 function clearSave() {
   try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* noop */ }
+}
+
+const TUTORIAL_KEY = 'gridironGems:seenTutorial';
+function hasSeenTutorial() {
+  try { return !!localStorage.getItem(TUTORIAL_KEY); } catch (e) { return true; }
+}
+function markTutorialSeen() {
+  try { localStorage.setItem(TUTORIAL_KEY, '1'); } catch (e) { /* noop */ }
 }
 
 function setState(patch) {
@@ -702,7 +711,9 @@ async function runOppPlay() {
 function newGame() {
   clearSave();
   state = freshState();
-  setState({ phase: 'playcall' });
+  const autoHelp = !hasSeenTutorial();
+  if (autoHelp) markTutorialSeen();
+  setState({ phase: 'playcall', showHelp: autoHelp, helpPage: 0 });
 }
 
 function resumeGame() {
@@ -718,6 +729,7 @@ function resumeGame() {
   }
   if (state.phase === 'board' && state.grid.length) state.noMoves = !hasAnyMove(state.grid);
   state.showMatchup = false;
+  state.showHelp = false;
   render();
 }
 
@@ -741,6 +753,7 @@ function renderTitle() {
     : `<div data-action="newGame" style="margin-top:18px;font-family:'Press Start 2P',monospace;font-size:13px;color:#fff;animation:blink 1.1s steps(1) infinite;cursor:pointer;">PRESS START</div>`;
   return `
     <div data-screen-label="Title" data-action="${hasSave ? '' : 'newGame'}" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;cursor:pointer;background:radial-gradient(circle at 50% 32%,#16285a 0%,#0a1020 70%);padding:30px;">
+      <div data-action="openHelp" style="position:absolute;top:16px;right:16px;font-family:'Press Start 2P',monospace;font-size:9px;color:#13210f;background:#ffd23f;border:3px solid #04060e;border-radius:6px;padding:8px 10px;cursor:pointer;letter-spacing:.5px;box-shadow:0 3px 0 #b58a0c;z-index:2;">❓ HOW TO PLAY</div>
       <div style="display:flex;gap:9px;animation:floaty 3s ease-in-out infinite;">${gems}</div>
       <div style="text-align:center;">
         <div class="pixel" style="font-size:34px;line-height:1.18;color:#ffd23f;text-shadow:4px 4px 0 #b1471a,7px 7px 0 rgba(0,0,0,.45);letter-spacing:1px;">GRIDIRON<br>GEMS</div>
@@ -850,6 +863,7 @@ function renderPlaycall() {
       <div style="display:flex;align-items:center;gap:6px;">
         <div data-action="openMatchup" style="font-family:'Press Start 2P',monospace;font-size:9px;color:#13210f;background:#21c7ff;border:2px solid #04060e;border-radius:6px;padding:6px 9px;cursor:pointer;letter-spacing:.5px;">📋 MATCHUP</div>
         <div data-action="openRoster" style="font-family:'Press Start 2P',monospace;font-size:9px;color:#0a0e1f;background:#2fd45e;border:2px solid #04060e;border-radius:6px;padding:6px 9px;cursor:pointer;letter-spacing:.5px;">🏈 ROSTER</div>
+        <div data-action="openHelp" style="font-family:'Press Start 2P',monospace;font-size:9px;color:#13210f;background:#ffd23f;border:2px solid #04060e;border-radius:6px;padding:6px 8px;cursor:pointer;letter-spacing:.5px;">❓</div>
       </div>
       <div class="pixel" style="font-size:10px;color:#ffd23f;">YOU ${S.score} &nbsp;·&nbsp; OPP ${S.oppScore}</div>
     </div>
@@ -956,6 +970,87 @@ function renderMatchupModal() {
         <div style="font-size:16px;color:#7f97cf;margin-bottom:14px;">${cp ? cp.name + ' personnel' : 'Pick a play to scout its personnel'}</div>
         ${rows}
         <div style="font-size:13px;color:#5870a8;margin:10px 0 4px;line-height:1.4;">Gem % is each player's static share of the board, from skill and how the chosen play features them. Blank % is how often the defender they're matched against locks one of their gems.</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// Plain title+paragraphs pages, paginated by helpPage. Kept free of any
+// reference to other render-time data so it can be declared anywhere.
+const HELP_PAGES = [
+  {
+    title: 'WELCOME TO THE GRIDIRON',
+    body: [
+      "You're the offensive coordinator. Call a play, match gems to move the ball, and snap when you're ready.",
+      'Drive the length of the field — match well, and the yards, first downs, and touchdowns follow.',
+    ],
+  },
+  {
+    title: '1 ▸ CALL A PLAY',
+    body: [
+      "Pick 1 of 6 plays. Each puts 5 of your 7 positions on the field, tagged PRIMARY, SUPPORT, or DECOY for how heavily it's featured.",
+      "That tag sets how often each position's gem shows up once you're on the board.",
+    ],
+  },
+  {
+    title: '2 ▸ MATCH & FILL METERS',
+    body: [
+      "Swap adjacent gems to make a row or column of 3+. Clearing a gem fills that position's meter — chain a cascade and it fills faster.",
+      "You get 6 moves per play. Whoever's meter is fullest when the play resolves gets the ball.",
+    ],
+  },
+  {
+    title: '3 ▸ SNAP THE BALL',
+    body: [
+      'Run out of moves, or hit HIKE! to snap early whenever you like.',
+      "A fuller meter means fewer busted plays, bigger gains, and better odds of breaking one open. The O-line's meter helps everyone by cutting down on negative plays — even though it never carries the ball itself.",
+    ],
+  },
+  {
+    title: '4 ▸ SPECIAL PIECES',
+    body: [
+      'Match 4 in a row for a Line Clearer (↔), an L/T shape for a Bomb (\u{1F4A3}), or 6+ in a row for a Color Bomb (★).',
+      'Swap a special into any neighbor to set it off — a line clearer wipes its row or column, the bomb clears a 3×3 block, and the color bomb wipes every gem of the color you swap it into.',
+    ],
+  },
+  {
+    title: '5 ▸ MOMENTUM & DEFENSE',
+    body: [
+      'Explosive plays and first downs charge your momentum meter. Fill it and cash it in to guarantee your next play breaks big.',
+      "When your drive ends, the defense gets a possession of its own — watch the log play out before the ball comes back to you.",
+    ],
+  },
+  {
+    title: '6 ▸ MANAGE YOUR ROSTER',
+    body: [
+      'Every position has backups on the bench. Swapping one in trades some skill for fresh legs — only a benched player recovers stamina.',
+      'Open ROSTER any time between plays to check stamina and make a swap before you call your next play.',
+    ],
+  },
+];
+
+function renderHelpModal() {
+  const idx = clamp(0, HELP_PAGES.length - 1, state.helpPage || 0);
+  const page = HELP_PAGES[idx];
+  const first = idx === 0, last = idx === HELP_PAGES.length - 1;
+  const body = page.body.map((p) => `<div style="font-size:16px;color:#cdddff;line-height:1.5;margin-bottom:10px;">${p}</div>`).join('');
+  const dots = HELP_PAGES.map((_, i) => {
+    const on = i === idx;
+    return `<div data-action="helpGoto" data-page="${i}" style="width:${on ? 10 : 7}px;height:${on ? 10 : 7}px;border-radius:50%;background:${on ? '#ffd23f' : '#27365c'};cursor:pointer;"></div>`;
+  }).join('');
+  const prevBtn = `<div data-action="${first ? '' : 'helpPrev'}" style="flex:1;text-align:center;font-family:'Press Start 2P',monospace;font-size:11px;padding:11px;border-radius:8px;border:3px solid #04060e;letter-spacing:1px;cursor:${first ? 'default' : 'pointer'};color:${first ? '#3a4a78' : '#cdddff'};background:${first ? '#0c1226' : '#1c2848'};">◂ BACK</div>`;
+  const nextBtn = `<div data-action="${last ? 'closeHelp' : 'helpNext'}" style="flex:1;text-align:center;font-family:'Press Start 2P',monospace;font-size:11px;padding:11px;border-radius:8px;border:3px solid #04060e;letter-spacing:1px;cursor:pointer;color:#13210f;background:#ffd23f;box-shadow:0 4px 0 #b58a0c;">${last ? 'GOT IT ✓' : 'NEXT ▸'}</div>`;
+  return `<div data-screen-label="How To Play" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,8,18,.86);padding:20px;z-index:30;">
+    <div style="position:relative;display:flex;flex-direction:column;width:100%;max-width:340px;max-height:86%;border-radius:14px;border:4px solid #ffd23f;background:#0b1228;box-shadow:0 0 0 4px #04060e,0 14px 40px rgba(0,0,0,.6);animation:popIn .3s ease-out;">
+      <div data-action="closeHelp" style="${MODAL_CLOSE_BTN_STYLE}">✕</div>
+      <div style="min-height:0;overflow-y:auto;padding:20px 18px 6px;flex:1;">
+        <div class="pixel" style="font-size:9px;color:#ffd23f;margin-bottom:8px;">HOW TO PLAY · ${idx + 1}/${HELP_PAGES.length}</div>
+        <div class="pixel" style="font-size:13px;color:#fff;margin-bottom:12px;padding-right:30px;line-height:1.4;">${page.title}</div>
+        ${body}
+      </div>
+      <div style="padding:14px 18px;display:flex;flex-direction:column;gap:10px;">
+        <div style="display:flex;justify-content:center;gap:6px;">${dots}</div>
+        <div style="display:flex;gap:8px;">${prevBtn}${nextBtn}</div>
       </div>
     </div>
   </div>`;
@@ -1132,6 +1227,7 @@ function render() {
   else if (state.phase === 'result') html = renderResult();
   else if (state.phase === 'oppdrive') html = renderOppDrive();
   else html = '';
+  if (state.showHelp) html += renderHelpModal();
   app.innerHTML = html;
   if (state.phase === 'board') {
     gemEls.clear();
@@ -1334,6 +1430,11 @@ document.addEventListener('DOMContentLoaded', () => {
       case 'openRoster': setState({ showRoster: true }); break;
       case 'closeRoster': setState({ showRoster: false }); break;
       case 'swapRoster': swapRoster(el.dataset.pos, Number(el.dataset.idx)); break;
+      case 'openHelp': markTutorialSeen(); setState({ showHelp: true, helpPage: 0 }); break;
+      case 'closeHelp': setState({ showHelp: false }); break;
+      case 'helpNext': setState({ helpPage: Math.min(HELP_PAGES.length - 1, (state.helpPage || 0) + 1) }); break;
+      case 'helpPrev': setState({ helpPage: Math.max(0, (state.helpPage || 0) - 1) }); break;
+      case 'helpGoto': setState({ helpPage: Number(el.dataset.page) }); break;
       default: break;
     }
   });
